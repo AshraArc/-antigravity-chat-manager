@@ -24,15 +24,29 @@ def clear_screen():
     sys.stdout.write("\033[H\033[2J\033[3J")
     sys.stdout.flush()
 
-def ensure_config_dir():
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+def get_config_dir():
+    # Priority: ~/.config/antigravity-chat-manager -> ~/.cache/antigravity-chat-manager -> /tmp
+    preferred = os.path.expanduser("~/.config/antigravity-chat-manager")
+    try:
+        os.makedirs(preferred, exist_ok=True)
+        return preferred
+    except OSError:
+        fallback = os.path.expanduser("~/.cache/antigravity-chat-manager")
+        try:
+            os.makedirs(fallback, exist_ok=True)
+            return fallback
+        except OSError:
+            tmp = "/tmp/antigravity-chat-manager"
+            os.makedirs(tmp, exist_ok=True)
+            return tmp
 
 def load_config():
-    ensure_config_dir()
+    cfg_dir = get_config_dir()
+    cfg_file = os.path.join(cfg_dir, "config.json")
     default_cfg = {"cli_command": ""}
-    if os.path.exists(CONFIG_FILE):
+    if os.path.exists(cfg_file):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(cfg_file, "r") as f:
                 cfg = json.load(f)
                 return {**default_cfg, **cfg}
         except Exception:
@@ -40,9 +54,10 @@ def load_config():
     return default_cfg
 
 def save_config(cfg):
-    ensure_config_dir()
+    cfg_dir = get_config_dir()
+    cfg_file = os.path.join(cfg_dir, "config.json")
     try:
-        with open(CONFIG_FILE, "w") as f:
+        with open(cfg_file, "w") as f:
             json.dump(cfg, f, indent=2)
     except Exception as e:
         print(f"Error saving config: {e}")
@@ -92,19 +107,21 @@ def detect_cli_command(force_reconfigure=False):
     return cmd
 
 def load_metadata():
-    ensure_config_dir()
-    if os.path.exists(METADATA_FILE):
+    cfg_dir = get_config_dir()
+    meta_file = os.path.join(cfg_dir, "metadata.json")
+    if os.path.exists(meta_file):
         try:
-            with open(METADATA_FILE, "r") as f:
+            with open(meta_file, "r") as f:
                 return json.load(f)
         except Exception:
             return {"chats": {}, "groups": ["General"]}
     return {"chats": {}, "groups": ["General"]}
 
 def save_metadata(data):
-    ensure_config_dir()
+    cfg_dir = get_config_dir()
+    meta_file = os.path.join(cfg_dir, "metadata.json")
     try:
-        with open(METADATA_FILE, "w") as f:
+        with open(meta_file, "w") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
         print(f"Error saving metadata: {e}")
@@ -419,11 +436,49 @@ def print_help():
 Antigravity Chat Manager (ACM)
 
 Usage:
-  ach            Launch interactive chat history and notebook manager
-  ach --search   Directly trigger fuzzy/text search across past chats
-  ach --config   Reconfigure your Antigravity launcher command or alias
-  ach --help     Show this help message
+  ach                  Launch interactive chat history and notebook manager
+  ach --search         Directly trigger fuzzy/text search across past chats
+  ach --list           Output plain text list of chats (for CLI/scripts)
+  ach --groups-cli     Output list of groups (for CLI/scripts)
+  ach --search-cli <q> Search chats via command line
+  ach --config         Reconfigure your Antigravity launcher command or alias
+  ach --help           Show this help message
 """)
+
+def list_chats_cli():
+    chats = get_all_chats()
+    if not chats:
+        print("No chats found.")
+        return
+    current_label = None
+    for idx, c in enumerate(chats, 1):
+        if c["time_label"] != current_label:
+            current_label = c["time_label"]
+            print(f"\n[{current_label}]")
+        print(f"  [{idx:2d}] [{c['group']}] {c['exact_time']} ({c['msgs']:2d} msgs) | {c['title']} | ID: {c['id']}")
+
+def list_groups_cli():
+    data = load_metadata()
+    chats = get_all_chats()
+    all_group_names = set(data.get("groups", ["General"]))
+    groups = {g: [] for g in all_group_names}
+    for c in chats:
+        groups.setdefault(c["group"], []).append(c)
+
+    print("Groups & Notebooks:")
+    for idx, g in enumerate(sorted(groups.keys()), 1):
+        count = len(groups[g])
+        print(f"  [{idx}] {g} ({count} chat{'s' if count != 1 else ''})")
+
+def search_chats_cli(query):
+    convos = get_all_chats()
+    matches = [c for c in convos if query.lower() in c["title"].lower() or query.lower() in c["group"].lower()]
+    if not matches:
+        print(f"No chats matching '{query}'.")
+        return
+    print(f"Found {len(matches)} chat(s) matching '{query}':")
+    for idx, c in enumerate(matches, 1):
+        print(f"  [{idx}] [{c['time_label']}] [{c['group']}] {c['title']} | ID: {c['id']}")
 
 def main():
     if len(sys.argv) > 1:
@@ -436,6 +491,16 @@ def main():
             return
         elif arg in ("--search", "-s"):
             search_chats()
+            return
+        elif arg == "--list":
+            list_chats_cli()
+            return
+        elif arg == "--groups-cli":
+            list_groups_cli()
+            return
+        elif arg == "--search-cli":
+            q = sys.argv[2] if len(sys.argv) > 2 else ""
+            search_chats_cli(q)
             return
 
     while True:
