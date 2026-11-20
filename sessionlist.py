@@ -433,16 +433,16 @@ def recent_chats_view():
 
 def print_help():
     print("""
-Antigravity Chat Manager (ACM)
+sessionList - Unified Antigravity Session Manager
 
 Usage:
-  ach                  Launch interactive chat history and notebook manager
-  ach --search         Directly trigger fuzzy/text search across past chats
-  ach --list           Output plain text list of chats (for CLI/scripts)
-  ach --groups-cli     Output list of groups (for CLI/scripts)
-  ach --search-cli <q> Search chats via command line
-  ach --config         Reconfigure your Antigravity launcher command or alias
-  ach --help           Show this help message
+  sessionlist                  Launch interactive terminal session manager
+  sessionlist --search         Directly trigger fuzzy/text search across past chats
+  sessionlist --list           Output plain text list of chats (for in-chat / CLI)
+  sessionlist --groups-cli     Output list of groups (for in-chat / CLI)
+  sessionlist --search-cli <q> Search chats via command line
+  sessionlist --config         Reconfigure your Antigravity launcher command or alias
+  sessionlist --help           Show this help message
 """)
 
 def list_chats_cli():
@@ -506,7 +506,7 @@ def main():
     while True:
         clear_screen()
         print("==========================================")
-        print("         ANTIGRAVITY CHAT MANAGER         ")
+        print("               sessionList                ")
         print("==========================================")
         print("  [1] Recent Chats")
         print("  [2] Groups")

@@ -1,20 +1,21 @@
 {
-  "name": "antigravity-chat-manager",
-  "displayName": "Antigravity Chat Manager",
-  "version": "1.1.0",
-  "description": "Interactive conversation history browser, notebook organizer, and session resumption slash commands for Antigravity CLI",
+  "name": "sessionlist",
+  "displayName": "sessionList",
+  "version": "1.2.0",
+  "description": "Unified session manager for Antigravity: interactive CLI browser in the terminal, /history slash command in chat",
   "author": {
     "name": "AshraArc",
-    "url": "https://github.com/AshraArc/-antigravity-chat-manager"
+    "url": "https://github.com/AshraArc/sessionList"
   },
-  "repository": "https://github.com/AshraArc/-antigravity-chat-manager",
+  "repository": "https://github.com/AshraArc/sessionList",
   "license": "MIT",
   "keywords": [
-    "chat-history",
+    "sessionlist",
     "sessions",
+    "chat-history",
     "notebooks",
     "organizer",
-    "cli",
-    "productivity"
+    "antigravity",
+    "cli"
   ]
 }
