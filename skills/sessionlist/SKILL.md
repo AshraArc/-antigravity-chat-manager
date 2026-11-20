@@ -7,11 +7,11 @@ description: Unified session history and notebook lookup for Antigravity. Trigge
 
 `sessionList` bridges terminal session management and in-chat history recall.
 
-## Slash Commands & In-Chat Triggers
+## In-Chat Slash Command: `/history`
 
-When the user asks for `/history`, `/sessions`, or previous chat lookups:
+When the user types `/history`:
 
-### 1. `/history` or `/sessions`
+### 1. `/history` (Recent Chats)
 Display recent conversations organized by chronological period:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --list
@@ -21,7 +21,7 @@ Format into a clean Markdown table with:
 - **Group**: e.g., `OS-Notes`, `Docker`, `General`
 - **Messages**: Number of turns
 - **Title / Summary**: First prompt or custom title
-- **Session ID**: UUID
+- **Session ID**: UUID for resumption
 
 ### 2. `/history search <query>`
 Filter past conversations by keyword or topic:
@@ -38,5 +38,5 @@ python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --groups-cli
 ### 4. Terminal Launcher Note
 Remind the user that they can also manage, rename, categorize, or delete sessions outside chat directly in their terminal using the unified CLI:
 ```bash
-sessionlist
+ach
 ```

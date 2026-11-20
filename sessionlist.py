@@ -433,16 +433,16 @@ def recent_chats_view():
 
 def print_help():
     print("""
-sessionList - Unified Antigravity Session Manager
+sessionList - Antigravity Chat History Manager
 
 Usage:
-  sessionlist                  Launch interactive terminal session manager
-  sessionlist --search         Directly trigger fuzzy/text search across past chats
-  sessionlist --list           Output plain text list of chats (for in-chat / CLI)
-  sessionlist --groups-cli     Output list of groups (for in-chat / CLI)
-  sessionlist --search-cli <q> Search chats via command line
-  sessionlist --config         Reconfigure your Antigravity launcher command or alias
-  sessionlist --help           Show this help message
+  ach                  Launch interactive terminal session manager
+  ach --search         Directly trigger fuzzy/text search across past chats
+  ach --list           Output plain text list of chats (for in-chat / CLI)
+  ach --groups-cli     Output list of groups (for in-chat / CLI)
+  ach --search-cli <q> Search chats via command line
+  ach --config         Reconfigure your Antigravity launcher command or alias
+  ach --help           Show this help message
 """)
 
 def list_chats_cli():

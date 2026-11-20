@@ -46,12 +46,11 @@ agy plugin install https://github.com/AshraArc/sessionList
 
 ## Usage
 
-### In Terminal:
+### In Terminal (Outside Chat):
 Simply run:
 ```bash
-sessionlist
+ach
 ```
-*(Or your custom shortcut if configured).*
 
 ```text
 ==========================================
@@ -70,10 +69,10 @@ Select >
 - `del <num>`: Delete session and clean up disk space
 - `del-group <name>`: Delete an entire notebook and all contained sessions
 
-### In Chat (Slash Command):
-While chatting with Antigravity, type:
-- `/history` or `/sessions`: List recent sessions with message counts and dates.
-- `/history search <query>`: Search past topics.
+### In Chat (Inside Antigravity):
+While chatting with Antigravity, simply type:
+- `/history`: List recent sessions with message counts, dates, and session IDs.
+- `/history search <query>`: Search past topics and conversations.
 - `/history groups`: Display organized notebooks.
 
 ---
