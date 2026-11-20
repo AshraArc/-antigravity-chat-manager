@@ -499,6 +499,33 @@ def search_chats_cli(query):
     for idx, c in enumerate(matches, 1):
         print(f"  [{idx}] [{c['time_label']}] [{c['group']}] {c['title']} | ID: {c['id']}")
 
+def bulk_group_by_time(group_name, max_age_seconds):
+    if not group_name:
+        print("Group name cannot be empty.")
+        return
+
+    data = load_metadata()
+    chats = get_all_chats()
+    now_ts = datetime.now().timestamp()
+    matching = [c for c in chats if (now_ts - c["mtime"]) <= max_age_seconds]
+
+    if not matching:
+        print("No chats found within the specified time window to group.")
+        return
+
+    for c in matching:
+        cid = c["id"]
+        if cid not in data["chats"]:
+            data["chats"][cid] = {}
+        data["chats"][cid]["group"] = group_name
+
+    existing = [g.lower() for g in data.get("groups", [])]
+    if group_name.lower() not in existing:
+        data.setdefault("groups", []).append(group_name)
+
+    save_metadata(data)
+    print(f"✔ Successfully grouped {len(matching)} chat(s) into '{group_name}'.")
+
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
@@ -525,6 +552,14 @@ def main():
         elif arg in ("--hours", "-H"):
             hours = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
             list_chats_cli(max_age_seconds=hours * 3600)
+            return
+        elif arg == "--group-window":
+            # Syntax: --group-window <group_name> --hours <N> OR --days <N>
+            gname = sys.argv[2] if len(sys.argv) > 2 else ""
+            unit = sys.argv[3].lower() if len(sys.argv) > 3 else "--hours"
+            val = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
+            sec = val * 86400 if "day" in unit else val * 3600
+            bulk_group_by_time(gname, sec)
             return
         elif arg == "--groups-cli":
             list_groups_cli()

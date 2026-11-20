@@ -36,20 +36,32 @@ Filter dynamically by time window:
   ```
 Display the classified results table matching that exact time window.
 
-### 3. Full History Lookup ("show me all chat histories", "full history", "all sessions")
+### 3. Bulk Grouping by Time Window ("put last hour chats into group X", "group chats from today into Y")
+Move multiple conversations matching a time window into a notebook group in one command:
+- By hours (e.g. "move chats from last 2 hours into Dev"):
+  ```bash
+  python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --group-window "<GroupName>" --hours <N>
+  ```
+- By days (e.g. "put chats from the last 3 days into OS-Revision"):
+  ```bash
+  python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --group-window "<GroupName>" --days <N>
+  ```
+Confirm to the user which chats were assigned to the new group.
+
+### 4. Full History Lookup ("show me all chat histories", "full history", "all sessions")
 Run without limits:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --list-all
 ```
 Display the complete classified table across all dates.
 
-### 4. Topic Search ("search history for <query>")
+### 5. Topic Search ("search history for <query>")
 Filter past conversations by keyword or topic:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --search-cli "<query>"
 ```
 
-### 5. Group Lookup ("show my notebooks", "show groups")
+### 6. Group Lookup ("show my notebooks", "show groups")
 List all organized notebooks/groups and session counts:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --groups-cli
