@@ -133,6 +133,7 @@ def clean_text(text):
     text = re.sub(r"</USER_REQUEST>", "", text)
     text = re.sub(r"<ADDITIONAL_METADATA>[\s\S]*?</ADDITIONAL_METADATA>", "", text)
     text = re.sub(r"<SYSTEM_MESSAGE>[\s\S]*?</SYSTEM_MESSAGE>", "", text)
+    text = re.sub(r"<USER_SETTINGS_CHANGE>[\s\S]*?</USER_SETTINGS_CHANGE>", "", text)
     text = " ".join(text.split())
     return text.strip()
 
