@@ -445,17 +445,24 @@ Usage:
   ach --help           Show this help message
 """)
 
-def list_chats_cli():
+def list_chats_cli(limit=15):
     chats = get_all_chats()
     if not chats:
         print("No chats found.")
         return
+
+    total_chats = len(chats)
+    displayed_chats = chats if limit is None else chats[:limit]
+
     current_label = None
-    for idx, c in enumerate(chats, 1):
+    for idx, c in enumerate(displayed_chats, 1):
         if c["time_label"] != current_label:
             current_label = c["time_label"]
             print(f"\n[{current_label}]")
         print(f"  [{idx:2d}] [{c['group']}] {c['exact_time']} ({c['msgs']:2d} msgs) | {c['title']} | ID: {c['id']}")
+
+    if limit is not None and total_chats > limit:
+        print(f"\nShowing {limit} most recent sessions. To see all {total_chats} chats, ask: 'show me all chat histories'")
 
 def list_groups_cli():
     data = load_metadata()
@@ -493,7 +500,11 @@ def main():
             search_chats()
             return
         elif arg == "--list":
-            list_chats_cli()
+            # Default cap: 15 recent sessions (or ~1 week)
+            list_chats_cli(limit=15)
+            return
+        elif arg in ("--list-all", "--all"):
+            list_chats_cli(limit=None)
             return
         elif arg == "--groups-cli":
             list_groups_cli()
