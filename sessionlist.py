@@ -438,18 +438,30 @@ sessionList - Antigravity Chat History Manager
 Usage:
   ach                  Launch interactive terminal session manager
   ach --search         Directly trigger fuzzy/text search across past chats
-  ach --list           Output plain text list of chats (for in-chat / CLI)
+  ach --list           Output plain text list of chats (default cap: 15)
+  ach --all            Output complete chat archive
+  ach --days <N>       Filter chats from the last N days (e.g. --days 7)
+  ach --hours <N>      Filter chats from the last N hours (e.g. --hours 2)
   ach --groups-cli     Output list of groups (for in-chat / CLI)
   ach --search-cli <q> Search chats via command line
   ach --config         Reconfigure your Antigravity launcher command or alias
   ach --help           Show this help message
 """)
 
-def list_chats_cli(limit=15):
+def list_chats_cli(limit=15, max_age_seconds=None):
     chats = get_all_chats()
     if not chats:
         print("No chats found.")
         return
+
+    now_ts = datetime.now().timestamp()
+    if max_age_seconds is not None:
+        filtered = [c for c in chats if (now_ts - c["mtime"]) <= max_age_seconds]
+        if not filtered:
+            print("No chats found within the specified time range.")
+            return
+        chats = filtered
+        limit = None  # Show all matching within that time filter
 
     total_chats = len(chats)
     displayed_chats = chats if limit is None else chats[:limit]
@@ -505,6 +517,14 @@ def main():
             return
         elif arg in ("--list-all", "--all"):
             list_chats_cli(limit=None)
+            return
+        elif arg in ("--days", "-d"):
+            days = float(sys.argv[2]) if len(sys.argv) > 2 else 7.0
+            list_chats_cli(max_age_seconds=days * 86400)
+            return
+        elif arg in ("--hours", "-H"):
+            hours = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+            list_chats_cli(max_age_seconds=hours * 3600)
             return
         elif arg == "--groups-cli":
             list_groups_cli()

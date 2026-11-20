@@ -24,20 +24,32 @@ Format into a clean Markdown table with:
 If there are more chats, mention:
 *"Showing 15 most recent chats. Ask 'show me all chat histories' to see your complete archive."*
 
-### 2. Full History Lookup ("show me all chat histories", "full history", "all sessions")
+### 2. Time-Filtered Lookups ("last N days", "past N hours", "chats from today")
+Filter dynamically by time window:
+- For days (e.g. "show chats from last 3 days" / "past 7 days"):
+  ```bash
+  python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --days <N>
+  ```
+- For hours (e.g. "show chats from last 2 hours" / "past hour"):
+  ```bash
+  python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --hours <N>
+  ```
+Display the classified results table matching that exact time window.
+
+### 3. Full History Lookup ("show me all chat histories", "full history", "all sessions")
 Run without limits:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --list-all
 ```
 Display the complete classified table across all dates.
 
-### 3. Topic Search ("search history for <query>")
+### 4. Topic Search ("search history for <query>")
 Filter past conversations by keyword or topic:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --search-cli "<query>"
 ```
 
-### 4. Group Lookup ("show my notebooks", "show groups")
+### 5. Group Lookup ("show my notebooks", "show groups")
 List all organized notebooks/groups and session counts:
 ```bash
 python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --groups-cli
