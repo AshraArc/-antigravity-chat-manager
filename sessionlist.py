@@ -499,7 +499,7 @@ def search_chats_cli(query):
     for idx, c in enumerate(matches, 1):
         print(f"  [{idx}] [{c['time_label']}] [{c['group']}] {c['title']} | ID: {c['id']}")
 
-def bulk_group_by_time(group_name, max_age_seconds):
+def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
     if not group_name:
         print("Group name cannot be empty.")
         return
@@ -507,10 +507,21 @@ def bulk_group_by_time(group_name, max_age_seconds):
     data = load_metadata()
     chats = get_all_chats()
     now_ts = datetime.now().timestamp()
-    matching = [c for c in chats if (now_ts - c["mtime"]) <= max_age_seconds]
+    matching = chats
+
+    if max_age_seconds is not None:
+        matching = [c for c in matching if (now_ts - c["mtime"]) <= max_age_seconds]
+
+    if query:
+        q = query.lower()
+        matching = [c for c in matching if q in c["title"].lower() or q in c["group"].lower()]
+
+    if ids:
+        id_set = set(ids)
+        matching = [c for c in matching if c["id"] in id_set]
 
     if not matching:
-        print("No chats found within the specified time window to group.")
+        print(f"No chats found matching criteria to add to '{group_name}'.")
         return
 
     for c in matching:
@@ -554,12 +565,19 @@ def main():
             list_chats_cli(max_age_seconds=hours * 3600)
             return
         elif arg == "--group-window":
-            # Syntax: --group-window <group_name> --hours <N> OR --days <N>
+            # Syntax: --group-window <group_name> --hours <N> OR --days <N> [--match <query>]
             gname = sys.argv[2] if len(sys.argv) > 2 else ""
             unit = sys.argv[3].lower() if len(sys.argv) > 3 else "--hours"
             val = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0
             sec = val * 86400 if "day" in unit else val * 3600
-            bulk_group_by_time(gname, sec)
+            q = sys.argv[6] if len(sys.argv) > 6 and sys.argv[5] == "--match" else None
+            smart_group(gname, max_age_seconds=sec, query=q)
+            return
+        elif arg == "--group-ids":
+            # Syntax: --group-ids <group_name> <id1> <id2> ...
+            gname = sys.argv[2] if len(sys.argv) > 2 else ""
+            ids = sys.argv[3:] if len(sys.argv) > 3 else []
+            smart_group(gname, ids=ids)
             return
         elif arg == "--groups-cli":
             list_groups_cli()
