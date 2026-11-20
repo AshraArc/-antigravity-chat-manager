@@ -537,6 +537,16 @@ def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
     save_metadata(data)
     print(f"✔ Successfully grouped {len(matching)} chat(s) into '{group_name}'.")
 
+def set_chat_title(cid, new_title):
+    if not cid or not new_title:
+        return
+    data = load_metadata()
+    if cid not in data["chats"]:
+        data["chats"][cid] = {}
+    data["chats"][cid]["title"] = new_title.strip()
+    save_metadata(data)
+    print(f"✔ Abstracted title saved for {cid}: '{new_title.strip()}'")
+
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
@@ -563,6 +573,12 @@ def main():
         elif arg in ("--hours", "-H"):
             hours = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
             list_chats_cli(max_age_seconds=hours * 3600)
+            return
+        elif arg == "--set-title":
+            # Syntax: --set-title <cid> "<clean_title>"
+            cid = sys.argv[2] if len(sys.argv) > 2 else ""
+            t = sys.argv[3] if len(sys.argv) > 3 else ""
+            set_chat_title(cid, t)
             return
         elif arg == "--group-window":
             # Syntax: --group-window <group_name> --hours <N> OR --days <N> [--match <query>]
