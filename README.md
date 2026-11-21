@@ -139,28 +139,30 @@ In any active Antigravity chat, simply type:
 
 ---
 
-## File Hierarchy
+## File Hierarchy & Architecture
 
 ```text
-/mnt/a/anti-g/
+sessionList/ (Repository Root)
+├── sessionlist.py              # Core engine: TSV master log parser, TUI, flock locking
+├── install.sh                  # Interactive installer: sets up shortcuts in ~/.local/bin
+├── plugin.json                 # Antigravity plugin manifest
+├── README.md                   # Documentation, guides & architecture flowcharts
+├── .gitignore                  # Git hygiene rules
+└── skills/
+    └── sessionlist/
+        └── SKILL.md            # Agent skill prompt definition (zero-token fast path)
+
+Runtime Storage (Created automatically in user's workspace / environment):
 ├── .agents/
-│   ├── plugins/sessionlist/      # Live workspace Antigravity plugin
-│   └── sessionlist_data/
-│       └── master_history.tsv   # Persistent plain-text master log
-├── bin/
-│   ├── antig-h                   # Executable quick-list launcher
-│   ├── antig-m                   # Executable interactive menu launcher
-│   ├── antig-history             # Master engine binary
-│   ├── setup_aliases.sh          # Linux/WSL alias config
-│   └── antig-history.ps1         # PowerShell alias config
-└── projects/
-    └── sessionList/              # Canonical Git repository root
-        ├── sessionlist.py
-        ├── skills/sessionlist/SKILL.md
-        ├── install.sh
-        ├── plugin.json
-        ├── README.md
-        └── .gitignore
+│   ├── plugins/sessionlist/    # Active installed Antigravity plugin
+│   ├── sessionlist_data/
+│   │   ├── master_history.tsv  # High-speed plain-text session catalog
+│   │   ├── history.lock        # POSIX kernel advisory mutex lock
+│   │   └── config.json         # Saved launcher alias and user preferences
+│   └── exported_chats/         # Markdown exports of full conversation notes (*.md)
+└── ~/.local/bin/               # User binary directory (in system $PATH)
+    ├── <prefix>-h              # Quick table dump launcher (e.g. ach-h, antig-h, ag-h)
+    └── <prefix>-m              # Interactive dashboard launcher (e.g. ach-m, antig-m, ag-m)
 ```
 
 ---
