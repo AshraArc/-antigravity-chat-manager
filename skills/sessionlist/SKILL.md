@@ -1,38 +1,27 @@
 ---
 name: sessionlist
-description: Unified session history and notebook lookup for Antigravity. Trigger when the user types /history, /sessions, asks to view or search chat history, or asks to group/organize past sessions.
+description: High-efficiency session history and notebook lookup for Antigravity. Trigger on /history, /sessions, or natural language requests for chat history.
 ---
 
 # sessionList Skill
 
-Bridges terminal session management (`ach`) and in-chat history actions.
+Direct, zero-token overhead session history recall from `master_history.tsv`.
 
-## Command Reference
+## FAST PATH (Standard In-Chat History)
 
-Run `sessionlist.py` located at `/mnt/a/anti-g/projects/sessionList/sessionlist.py`:
+Whenever the user asks for chat history (e.g. `/history`, `show my chats`, `history of past 7 days`):
+1. **Execute the CLI tool directly**:
+   - Recent chats: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --list`
+   - Filter by days: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --days <N>`
+   - Filter by hours: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --hours <N>`
+   - Keyword search: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --search-cli "<query>"`
+   - All history: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --all`
+2. **CLEAN TOOL SUMMARY**:
+   - Always set `toolSummary` to a clean short phrase (e.g. `History lookup`, `Session history`).
+3. **ZERO-TOKEN FAST OUTPUT**:
+   - The CLI tool outputs a pre-aligned table formatted strictly for an 80-column terminal.
+   - Output the tool result DIRECTLY inside a code block or verbatim. DO NOT re-tokenize or summarize.
 
-1. **List Recent Chats** (Default cap: 15):
-   `python3 .../sessionlist.py --list`
-
-2. **List All Chats** (No cap):
-   `python3 .../sessionlist.py --list-all`
-
-3. **Time-Filtered Chats**:
-   `python3 .../sessionlist.py --days <N>` or `--hours <N>`
-
-4. **Topic / Keyword Search**:
-   `python3 .../sessionlist.py --search-cli "<query>"`
-
-5. **List Notebook Groups**:
-   `python3 .../sessionlist.py --groups-cli`
-
-6. **Abstraction Filter (Smart Titling)**:
-   When displaying chats, ALWAYS apply the AI Abstraction Filter:
-   - For any chat with a raw/unpolished prompt (e.g. starting with "hey i...", "can you..."), distill it into a clean, 2-to-5 word title (e.g. "Ryzen AI NPU Evaluation", "Docker WSL Setup").
-   - Persist the abstracted title so the terminal CLI benefits: `python3 .../sessionlist.py --set-title <cid> "<Clean Title>"`
-
-7. **Smart Grouping**:
-   - Filter by time & topic: `python3 .../sessionlist.py --group-window "<Group>" --hours <N> --match "<query>"`
-   - Specific session IDs: `python3 .../sessionlist.py --group-ids "<Group>" <id1> <id2>`
-
-Format table output cleanly with: Period, Group, Message count, Abstracted Title, and Session ID.
+## ASYNC CHAT TITLING (Turn 1 or 2)
+On turn 1 or turn 2 of a session, if the current session still has a raw/default title, run in the background:
+`python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --set-title <current_cid> "<Clean 2-to-4 Word Title>"`

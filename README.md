@@ -5,39 +5,72 @@ Unified session manager and history recall for **Google Antigravity CLI (`agy`)*
 Created by **AshraArc**.
 
 Use **`sessionList`** across two environments:
-1. **Terminal Interface (`ach`)**: Interactive session manager to view chronological history, create subject notebooks, perform fuzzy search, resume, and clean up past sessions.
-2. **In-Chat Plugin (`/history` or plain prompts)**: Native conversational recall allowing the agent to list, filter, search, and group past sessions during active chats.
+1. **Terminal Interface**:
+   - **`antig-h`**: Instant non-interactive session table list directly in your terminal (< 90ms).
+   - **`antig-m`**: Interactive management dashboard to resume, search, edit, multi-delete, or launch new chats.
+2. **In-Chat Plugin (`/history` or plain prompts)**: Native conversational recall allowing the agent to list, filter, search, and group past sessions during active chats with zero token re-generation delay.
+
+---
+
+## Architecture Flowcharts
+
+### 1. Fast-Path In-Chat Query Flow
+```mermaid
+flowchart TD
+    In["User: /history"] --> Q{"Filter?"}
+    Q -- "No" --> A1["1. Read master_history.tsv<br>(<0.2 ms)"]
+    A1 --> Out["2. Stream 76-col Table<br>(0 token LLM overhead)"]
+    Q -- "Yes (e.g. past 7 days)" --> B1["1. Fast in-memory slice<br>(by days / group)"]
+    B1 --> Out
+    Out --> UI["Render to Terminal"]
+```
+
+### 2. Multi-Terminal Concurrency & Storage Flow
+```mermaid
+flowchart TD
+    T1["Terminal A"] --> LK["history.lock (Kernel flock)"]
+    T2["Terminal B"] --> LK
+    LK --> TSV["master_history.tsv<br>(/mnt/a/anti-g/.agents/sessionlist_data)"]
+    TSV --> MIR["Dual-Mirror Backup<br>(~/.gemini/.../plugin_data)"]
+```
 
 ---
 
 ## Key Features
 
-- **Chronological History Feed**: Automatically parsed from local transcript logs and sorted from newest to oldest.
-- **Smart Date Segmentation**: Grouped under `[Today]`, `[Yesterday]`, `[X days ago]`, and calendar months.
-- **AI Abstraction Filter**: Automatically distills raw, verbose user prompts into clean 2-to-5 word topic summaries and persists them across both terminal and chat views.
-- **Subject Notebooks & Groups**: Categorize related sessions into custom subjects (e.g., `OS-Coursework`, `Docker`, `Math`).
-- **Flexible Time-Window Filters**: Filter sessions by past hours (`--hours <N>`) or days (`--days <N>`).
-- **Smart Grouping**: Group chats matching specific topics and time ranges in one step.
-- **Interactive Fuzzy Search**: Instant keyboard navigation powered by `fzf` (with standard text fallback).
-- **Sub-100ms Performance**: Zero external heavy dependencies; built purely with standard Python 3.
+- **Ultra-Fast Plain-Text TSV Engine**: Zero JSON serialization overhead. In-process sync and read in **< 0.25 ms**.
+- **Dual CLI Shortcuts**:
+  - `antig-h`: Dumps pre-aligned table directly to terminal and returns immediately to prompt.
+  - `antig-m`: Opens interactive TUI dashboard.
+- **Persistent Workspace Storage**: Master log resides in `.agents/sessionlist_data/` on your workspace disk — safe from container resets, WSL restarts, or reboots.
+- **Automated Dual-Mirroring**: Automatically synced to Antigravity plugin data.
+- **Batch Multi-Delete (`d n1,n2..`)**: Delete multiple sessions in one step (e.g. `d 1,3,4` or `d 1 3 4`) with instant auto-refresh.
+- **Edit & Rename Sessions (`e <num>`)**: Update session titles or reassign notebook groups on the fly.
+- **New Chat Launcher (`n`)**: Launch a fresh Antigravity session directly from recent chats or search.
+- **Zero-Token In-Chat Fast Path**: Pre-formatted 76-column tables fit standard 80x24 terminals without wrapping or LLM token lag.
 
 ---
 
-## Installation
+## Installation & Setup
 
-### 1. Terminal Command Setup (`ach`)
+### 1. Terminal Setup
+Add the shortcuts to your shell:
+
+**For Bash / Linux / WSL**:
 ```bash
-git clone https://github.com/AshraArc/sessionList.git
-cd sessionList
-chmod +x install.sh
-./install.sh
+source /mnt/a/anti-g/bin/setup_aliases.sh
 ```
-Follow the one-time prompt to configure your launcher shortcut (`ach`).
+*(Or add `source /mnt/a/anti-g/bin/setup_aliases.sh` to your `~/.bashrc`)*
+
+**For PowerShell (Windows)**:
+```powershell
+. A:\anti-g\bin\antig-history.ps1
+```
 
 ### 2. Antigravity In-Chat Plugin Setup
 To enable the `/history` skill inside your Antigravity conversations:
 ```bash
-agy plugin install /path/to/sessionList
+agy plugin install /mnt/a/anti-g/projects/sessionList
 # or directly from your GitHub repository:
 agy plugin install https://github.com/AshraArc/sessionList
 ```
@@ -46,69 +79,96 @@ agy plugin install https://github.com/AshraArc/sessionList
 
 ## Usage Guide
 
-### A. Terminal Interface (`ach`)
+### A. Terminal Interface
 
-Launch the interactive manager:
+#### 1. Instant Table Dump (`antig-h`)
 ```bash
-ach
+antig-h              # Show 15 most recent sessions
+antig-h --all        # Show complete history
+antig-h --days 7     # Filter sessions from past 7 days
+antig-h --hours 2    # Filter sessions from past 2 hours
+antig-h --search-cli "ryzen" # Search by keyword
+```
+
+#### 2. Interactive Management Menu (`antig-m`)
+```bash
+antig-m
 ```
 
 ```text
 ==========================================
                sessionList                
 ==========================================
-  [1] Recent Chats
-  [2] Groups
-  [3] Search
-  [q] Quit
+  [1] All Chats
+  [2] Search & Resume
+  [3] Groups & Notebooks
+  [4] Settings
+  [q] Quit (or press ESC)
 ------------------------------------------
 Select > 
 ```
 
-#### Terminal Shortcuts:
-- `<number>`: Resume selected session in Antigravity (`agy --conversation <id>`).
-- `edit <number>`: Rename session title or assign to a notebook group.
-- `del <number>`: Permanently delete a single session.
-- `del-group <name>`: Delete an entire notebook group and all its sessions.
-- `b` or `q`: Return to previous menu or exit cleanly.
-
-#### Command-Line Flags:
-```bash
-ach --search                            # Open instant fuzzy search
-ach --list                              # Display 15 most recent sessions
-ach --all                               # Display complete conversation archive
-ach --days 7                            # View sessions from the last 7 days
-ach --hours 2                           # View sessions from the past 2 hours
-ach --group-window "OS" --hours 2 --match "memory"   # Group matching chats
-ach --help                              # Display all available flags
+**Inside All Chats**:
+```text
+Cmds: <num> resume | e <num> edit | d <n1,n2..> del | n new | Esc/b back
+Select > 
 ```
+- `<num>`: Resume selected session.
+- `e <num>`: Edit chat title or change its group (e.g. `e 2`).
+- `d <n1,n2..>`: Delete one or multiple sessions (e.g. `d 1,3,4` or `d 1 3 4`). Auto-refreshes immediately!
+- `n`: Launch a brand-new Antigravity session.
+- `ESC` or `b`: Return to previous menu.
+
+**Inside Settings (`[4] Settings`)**:
+- `[1] CLI Alias & Shortcuts`: In-place alias renaming (`ag`, `antig`, `ai`, `agy`) with automatic shortcut generation.
+- `[2] Default Time Window Filter`: Choose default view (*All time*, *Past 7 days*, *Past 30 days*).
+- `[3] Export Chats to Markdown (.md)`: Exports conversations to human-readable markdown notes in `.agents/exported_chats/`.
+- `[4] Backup Master History`: Creates timestamped `.tsv` catalog backups.
+- `[5] Restore Master History from Backup`: One-click recovery if master log is ever corrupted or deleted.
+- `[6] Storage & Diagnostics Info`: Real-time inspection of storage paths, chat counts, and file sizes.
 
 ---
 
 ### B. In-Chat Natural Language Commands
 
-While chatting in Antigravity, you can use either `/history` or natural English prompts:
+In any active Antigravity chat, simply type:
 
 | What you want to do | Example Prompt |
 | :--- | :--- |
 | **View recent sessions** | `/history` or `"show my chat history"` |
 | **View full archive** | `"show me all chat histories"` |
-| **Filter by time window** | `"show chats from the last 3 days"` or `"past 2 hours"` |
-| **Search past discussions** | `/history search docker` or `"search history for paging"` |
-| **View notebooks / groups** | `/history groups` or `"show my notebooks"` |
-| **Smart group by time + topic**| `"group the docker chats from today into DevOps"` |
+| **Filter by time window** | `"history of past 7 days"` or `"past 2 hours"` |
+| **Search past discussions** | `"search history for ryzen"` |
+| **View notebooks / groups** | `"show my notebook groups"` |
 
 ---
 
-## Storage Architecture
+## File Hierarchy
 
-All preferences, titles, and group assignments are stored under standard XDG paths:
-- `~/.config/antigravity-chat-manager/metadata.json`: Stores custom titles and notebook classifications.
-- `~/.config/antigravity-chat-manager/config.json`: Stores your custom Antigravity command/alias.
-- `~/.gemini/antigravity-cli/brain/`: Native session transcript storage (preserved).
+```text
+/mnt/a/anti-g/
+├── .agents/
+│   ├── plugins/sessionlist/      # Live workspace Antigravity plugin
+│   └── sessionlist_data/
+│       └── master_history.tsv   # Persistent plain-text master log
+├── bin/
+│   ├── antig-h                   # Executable quick-list launcher
+│   ├── antig-m                   # Executable interactive menu launcher
+│   ├── antig-history             # Master engine binary
+│   ├── setup_aliases.sh          # Linux/WSL alias config
+│   └── antig-history.ps1         # PowerShell alias config
+└── projects/
+    └── sessionList/              # Canonical Git repository root
+        ├── sessionlist.py
+        ├── skills/sessionlist/SKILL.md
+        ├── install.sh
+        ├── plugin.json
+        ├── README.md
+        └── .gitignore
+```
 
 ---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License. Created by **AshraArc**.
