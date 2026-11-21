@@ -51,16 +51,27 @@ flowchart TD
 
 ---
 
-## Installation & Setup
+## Quick Install
 
-### 1. Terminal Quick Setup (`install.sh`)
-From the cloned `sessionList` directory, run:
+Run this single command in your terminal to install immediately:
 
 ```bash
-chmod +x install.sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash
 ```
-Follow the prompt to choose your command shortcut (e.g. `ach`, `antig`, `ag`). The installer automatically generates the terminal shortcuts into `~/.local/bin` and configures your shell environment!
+
+> **Prefer a custom command prefix like `ag` or `ach`?**
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash -s -- ag
+> ```
+
+---
+
+## Installation & Setup
+
+### Option 1: 1-Line Quick Install (Recommended)
+Paste the command above into your terminal. It installs `antig-h` (instant dump) and `antig-m` (management dashboard) directly into `~/.local/bin/`.
+
+### Option 2: Manual Clone & Setup (`install.sh`)
 
 ---
 
