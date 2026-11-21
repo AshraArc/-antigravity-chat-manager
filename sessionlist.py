@@ -1000,17 +1000,43 @@ def list_groups_cli():
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
-        if arg in ("--help", "-h"):
-            print("""sessionList (v2.1 Master Log)
+        if arg in ("--version", "-v"):
+            print("sessionList v2.0.0 (by AshraArc)")
+            return
+        elif arg in ("--update", "update"):
+            install_base = os.path.expanduser("~/.local/share/sessionlist")
+            if os.path.exists(os.path.join(install_base, ".git")):
+                print("Checking for updates...")
+                try:
+                    res = subprocess.run(["git", "-C", install_base, "pull"], capture_output=True, text=True)
+                    print(res.stdout.strip() if res.stdout else "✔ sessionList is already up to date.")
+                except Exception as e:
+                    print(f"Error checking updates: {e}")
+            else:
+                print("To update, run:")
+                print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash")
+            return
+        elif arg == "--uninstall":
+            uninstall_sessionlist()
+            return
+        elif arg in ("--help", "-h"):
+            print("""sessionList v2.0.0 — Unified Antigravity Session Manager
 Usage:
-  ach                 Interactive terminal manager
-  ach --list          Fast direct list of recent chats
-  ach --all           Show complete history
-  ach --days <N>      Filter by last N days (e.g. --days 7)
-  ach --hours <N>     Filter by last N hours (e.g. --hours 2)
-  ach --search-cli <q> Search titles & groups
-  ach --groups-cli    List all notebook groups
-  ach --set-title <id> "<title>" Set clean abstracted title
+  <cmd>-h [options]         Quick non-interactive table dump
+  <cmd>-m                   Interactive dashboard menu
+
+Options:
+  --help, -h                Show this help message
+  --version, -v             Show version information
+  --update                  Check and pull latest updates
+  --uninstall               Uninstall sessionList and its shortcuts
+  --list                    Show recent chats (default for <cmd>-h)
+  --all                     Show complete uncapped history
+  --days <N>, -d <N>        Filter chats from the last N days (e.g. --days 7)
+  --hours <N>, -H <N>       Filter chats from the last N hours (e.g. --hours 2)
+  --search-cli <query>      Search chat titles and notebook groups
+  --groups-cli              List all notebook groups
+  --set-title <id> "<title>" Set clean abstracted session title
 """)
             return
         elif arg == "--list":
