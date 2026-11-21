@@ -53,27 +53,23 @@ flowchart TD
 
 ## Installation & Setup
 
-### 1. Terminal Setup
-Add the shortcuts to your shell:
+### 1. Terminal Quick Setup (`install.sh`)
+From the cloned `sessionList` directory, run:
 
-**For Bash / Linux / WSL**:
 ```bash
-source /mnt/a/anti-g/bin/setup_aliases.sh
+chmod +x install.sh
+./install.sh
 ```
-*(Or add `source /mnt/a/anti-g/bin/setup_aliases.sh` to your `~/.bashrc`)*
+Follow the prompt to choose your command shortcut (e.g. `ach`, `antig`, `ag`). The installer automatically generates the terminal shortcuts into `~/.local/bin` and configures your shell environment!
 
-**For PowerShell (Windows)**:
-```powershell
-. A:\anti-g\bin\antig-history.ps1
-```
+---
 
 ### 2. Antigravity In-Chat Plugin Setup
-To enable the `/history` skill inside your Antigravity conversations:
+To enable the conversational session recall skill inside Antigravity:
 ```bash
-agy plugin install /mnt/a/anti-g/projects/sessionList
-# or directly from your GitHub repository:
-agy plugin install https://github.com/AshraArc/sessionList
+agy plugin install https://github.com/AshraArc/-antigravity-chat-manager
 ```
+*(Or install locally: `agy plugin install /path/to/sessionList`)*
 
 ---
 
