@@ -819,6 +819,64 @@ def export_chat_to_markdown():
     print(f"  {export_dir}")
     get_prompt_input("\nPress Enter or ESC to return...")
 
+def uninstall_sessionlist():
+    clear_screen()
+    print("==========================================")
+    print("          Uninstall sessionList           ")
+    print("==========================================")
+    print("This will remove sessionList binaries and")
+    print("shortcuts from ~/.local/bin/ and")
+    print("~/.local/share/sessionlist/.")
+    print("\nYour conversation history will remain safe.")
+    print("------------------------------------------")
+    confirm = get_prompt_input("Are you sure you want to uninstall? (y/N): ").strip().lower()
+
+    if confirm != "y":
+        print("\nUninstall cancelled.")
+        time.sleep(1)
+        return
+
+    bin_dir = os.path.expanduser("~/.local/bin")
+    install_base = os.path.expanduser("~/.local/share/sessionlist")
+
+    # Find and delete aliases in bin_dir
+    removed_files = []
+    cfg = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+
+    current_alias = cfg.get("alias", "")
+    prefixes = {"ach", "antig", "ag"}
+    if current_alias:
+        prefixes.add(current_alias)
+
+    for p in prefixes:
+        for suffix in ["", "-h", "-m"]:
+            fpath = os.path.join(bin_dir, f"{p}{suffix}")
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    removed_files.append(os.path.basename(fpath))
+                except Exception:
+                    pass
+
+    # Remove install base directory if exists
+    if os.path.exists(install_base):
+        try:
+            shutil.rmtree(install_base)
+        except Exception:
+            pass
+
+    print("\n✔ Successfully uninstalled sessionList!")
+    if removed_files:
+        print(f"  Removed binaries: {', '.join(removed_files)}")
+    print("\nThank you for using sessionList.")
+    sys.exit(0)
+
 def settings_view():
     while True:
         clear_screen()
@@ -831,6 +889,7 @@ def settings_view():
         print("  [4] Backup Master History (TSV)")
         print("  [5] Restore Master History from Backup")
         print("  [6] Storage & Diagnostics Info")
+        print("  [7] Uninstall sessionList")
         print("  [b] Back / ESC")
         print("------------------------------------------")
         choice = get_prompt_input("Select > ").lower()
@@ -849,6 +908,8 @@ def settings_view():
             restore_history_log()
         elif choice == "6":
             show_storage_info()
+        elif choice == "7":
+            uninstall_sessionlist()
 
 def start_new_chat():
     cli_cmd = detect_cli_command()

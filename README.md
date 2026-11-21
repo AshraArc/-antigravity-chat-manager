@@ -84,6 +84,19 @@ agy plugin install https://github.com/AshraArc/-antigravity-chat-manager
 
 ---
 
+## Uninstallation
+
+To remove `sessionList` and all its terminal shortcuts completely:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/uninstall.sh | bash
+```
+
+Or if you have the repo cloned locally:
+```bash
+./uninstall.sh
+```
+
 ## Usage Guide
 
 ### A. Terminal Interface
@@ -133,6 +146,7 @@ Select >
 - `[4] Backup Master History`: Creates timestamped `.tsv` catalog backups.
 - `[5] Restore Master History from Backup`: One-click recovery if master log is ever corrupted or deleted.
 - `[6] Storage & Diagnostics Info`: Real-time inspection of storage paths, chat counts, and file sizes.
+- `[7] Uninstall sessionList`: Clean removal of all shortcuts and binary installations.
 
 ---
 
