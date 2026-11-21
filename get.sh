@@ -8,10 +8,6 @@ BIN_DIR="$HOME/.local/bin"
 
 mkdir -p "$BIN_DIR"
 
-echo "=================================================="
-echo "      sessionList One-Line Quick Installer        "
-echo "=================================================="
-
 if [ -d "$INSTALL_BASE/.git" ]; then
     echo "Updating existing sessionList..."
     git -C "$INSTALL_BASE" pull --quiet
@@ -21,8 +17,19 @@ else
     git clone --depth 1 --quiet "$REPO_URL" "$INSTALL_BASE"
 fi
 
-# Determine command prefix (default: antig)
-CMD_PREFIX="${1:-antig}"
+# Determine command prefix:
+# If user passed an argument (e.g. bash -s -- ag), use it.
+# Otherwise, if running interactively in terminal, prompt for custom alias with default 'ach'.
+# If running non-interactively without tty, fall back to 'ach'.
+DEFAULT_PREFIX="ach"
+if [ -n "$1" ]; then
+    CMD_PREFIX="$1"
+elif [ -t 0 ] || [ -e /dev/tty ]; then
+    read -p "Enter preferred alias/command prefix [default: $DEFAULT_PREFIX]: " USER_CMD < /dev/tty || true
+    CMD_PREFIX="${USER_CMD:-$DEFAULT_PREFIX}"
+else
+    CMD_PREFIX="$DEFAULT_PREFIX"
+fi
 
 SCRIPT_PATH="$INSTALL_BASE/sessionlist.py"
 
@@ -47,8 +54,4 @@ chmod +x "$BIN_DIR/${CMD_PREFIX}-m"
 # 3. Direct base command
 ln -sf "$BIN_DIR/${CMD_PREFIX}-m" "$BIN_DIR/$CMD_PREFIX"
 
-echo "✔ Successfully installed to $BIN_DIR:"
-echo "   - ${CMD_PREFIX}-h  (Instant table dump)"
-echo "   - ${CMD_PREFIX}-m  (Interactive dashboard)"
-echo "   - ${CMD_PREFIX}    (Direct shortcut)"
-echo "=================================================="
+echo "✔ Installed ${CMD_PREFIX}-h, ${CMD_PREFIX}-m to $BIN_DIR"
