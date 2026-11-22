@@ -440,6 +440,33 @@
     </div>
 
     <!-- Feature Grid with Glow -->
+    
+    <!-- Antigravity Deep Integration Section -->
+    <section class="features-section" style="margin-top: -20px; margin-bottom: 60px;">
+      <div class="features-header">
+        <h2>Native Antigravity Integration</h2>
+        <p>Built to cooperate directly with Antigravity's internal architecture, not fight it.</p>
+      </div>
+      <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        <div class="feature-card">
+          <h3>🔗 Direct SQLite Sync</h3>
+          <p>Directly queries Antigravity's central <code>conversation_summaries.db</code>. Every chat started in <code>agy</code> is indexed automatically in real time.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🧹 Multi-Layer Purge</h3>
+          <p>Batch deleting in <code>sessionList</code> executes clean SQL deletes across Antigravity's summary &amp; FTS tables. Deleted chats disappear from <code>/resume</code> permanently.</p>
+        </div>
+        <div class="feature-card">
+          <h3>📁 Workspace-Aware Resume</h3>
+          <p>Remembers the original folder where each session started, switching into it before resuming so <code>agy</code> never triggers untrusted folder security prompts.</p>
+        </div>
+        <div class="feature-card">
+          <h3>⚡ Standalone UNIX Pipeline</h3>
+          <p>Run quick queries directly from your shell (<code>ach -l</code>, <code>ach -s</code>, <code>ach -x</code>) without having to launch or wait for the agent LLM runtime.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="features-section">
       <div class="features-header">
         <h2>Engineered for Power Users</h2>

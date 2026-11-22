@@ -14,6 +14,59 @@ Run it from any terminal:
 
 ---
 
+
+---
+
+## How sessionList Integrates with Antigravity CLI (`agy`)
+
+`sessionList` is engineered to hook cleanly into Antigravity's native storage architecture rather than fighting or replacing it:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Developer Shell (Terminal)                │
+│             ach -l  |  ach -s  |  ach -d  |  ach -x          │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+                ┌──────────────┴──────────────┐
+                ▼                             ▼
+   ┌───────────────────────────┐ ┌───────────────────────────┐
+   │    sessionList SQLite     │ │   Antigravity Central     │
+   │  history.db (WAL + FTS5)  │ │ conversation_summaries.db │
+   └────────────┬──────────────┘ └────────────┬──────────────┘
+                │                             │
+                │     Direct SQLite Sync      │
+                ├─────────────────────────────┤
+                ▼                             ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │            Antigravity Runtime Persistence              │
+   │  • ~/.gemini/antigravity-cli/conversations/<uuid>.db    │
+   │  • ~/.gemini/antigravity-cli/brain/<uuid>/logs/         │
+   │  • Original Project Directory (No Folder Trust Errors)   │
+   └─────────────────────────────────────────────────────────┘
+```
+
+### 1. Direct SQLite & FTS5 Synchronization
+- **Native Discovery**: `sessionList` directly reads Antigravity's `~/.gemini/antigravity-cli/conversation_summaries.db`, automatically discovering chats as soon as they are created in `agy`.
+- **FTS5 Full-Text Indexing**: Syncs transcript messages into an SQLite `FTS5` virtual table so you can search the exact words, errors, and code blocks discussed across all conversations.
+
+### 2. Multi-Layer Purge vs Built-in `/resume`
+- When you delete a chat in `sessionList` (`ach -d 1,2` or `d 1-3`):
+  1. Executes clean SQL deletions in `conversation_summaries.db` (`conversation_summaries`, `conversations_fts`, `conversation_parents`).
+  2. Deletes the per-session database `conversations/<uuid>.db*`.
+  3. Deletes raw brain logs and annotations.
+  4. Removes the record from `history.db`.
+- **The Result**: Unlike manual file deletion, the session vanishes **permanently and cleanly from Antigravity's built-in `/resume` picker** with zero ghost entries.
+
+### 3. Workspace-Aware Resume (No Untrusted Folder Warnings)
+- Antigravity links chats to specific project roots. When resuming across folders, `agy` often halts with security warnings (*"Do you trust this folder?"*).
+- `sessionList` tracks the original directory where the chat was created. When you select a session, it automatically switches (`cd <workspace>`) before handing off execution via `os.execvp`, ensuring instant resume without security friction.
+
+### 4. Non-Interactive CLI Pipelining
+- Antigravity's `/resume` is an interactive TUI only. `sessionList` adds UNIX scripting capabilities:
+  - `ach -l`: Quick formatted table dump to standard output.
+  - `ach -x <id|all>`: Scriptable export to Markdown for CI or documentation notes.
+  - `ach -d <ids>`: Bulk cleanup in automated scripts.
+
 ## Key Features
 
 - **SQLite WAL Engine + FTS5 Full-Text Search**:
