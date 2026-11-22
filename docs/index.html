@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sessionList - Chat & History Manager for Google Antigravity</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d13;
+      --card-bg: #121820;
+      --card-border: #212a36;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-bright: #f0f6fc;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-glow: rgba(88, 166, 255, 0.25);
+      --accent-green: #3fb950;
+      --code-bg: #05080c;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      width: 100%;
+    }
+    a { color: var(--accent); text-decoration: none; transition: color 0.15s ease; }
+    a:hover { color: #79c0ff; }
+    
+    .container {
+      width: 100%;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Top Navigation Bar */
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 0;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+      margin-bottom: 48px;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--text-bright);
+    }
+    .nav-brand svg { fill: var(--accent); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #1f2733;
+      color: var(--text-bright);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      transition: all 0.2s ease;
+    }
+    .nav-btn:hover {
+      background: #2a3444;
+      border-color: #8b949e;
+      color: #fff;
+      transform: translateY(-1px);
+    }
+    .nav-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* Hero Section */
+    header {
+      text-align: center;
+      margin-bottom: 52px;
+    }
+    .hero-badges {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 14px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: 20px;
+      background: rgba(88, 166, 255, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+    }
+    .badge-star {
+      background: rgba(234, 179, 8, 0.12);
+      color: #eab308;
+      border: 1px solid rgba(234, 179, 8, 0.3);
+    }
+    .badge-star svg { width: 14px; height: 14px; fill: currentColor; }
+
+    h1 {
+      font-size: 3.2rem;
+      font-weight: 800;
+      color: var(--text-bright);
+      letter-spacing: -0.035em;
+      margin-bottom: 18px;
+      line-height: 1.2;
+    }
+    .subtitle {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 720px;
+      margin: 0 auto 36px;
+      line-height: 1.5;
+    }
+
+    /* Install Command Box */
+    .install-box {
+      background: var(--code-bg);
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 860px;
+      margin: 0 auto;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .install-cmd-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+    .shell-prompt {
+      color: #3fb950;
+      font-family: 'Fira Code', monospace;
+      font-weight: 600;
+      user-select: none;
+    }
+    .install-cmd {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.92rem;
+      color: #79c0ff;
+      word-break: break-all;
+      line-height: 1.4;
+      text-align: left;
+    }
+    .copy-btn {
+      background: #1f2733;
+      color: var(--text-bright);
+      border: 1px solid var(--border);
+      padding: 9px 18px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-left: 18px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .copy-btn:hover {
+      background: #2a3444;
+      border-color: #8b949e;
+    }
+
+    /* Terminal Window Simulator */
+    .terminal-window {
+      background: #03060a;
+      border: 1px solid #232b38;
+      border-radius: 12px;
+      box-shadow: 0 20px 48px rgba(0,0,0,0.7), 0 0 20px rgba(88, 166, 255, 0.05);
+      margin: 56px auto 72px;
+      width: 100%;
+      max-width: 940px;
+      overflow: hidden;
+    }
+    .terminal-bar {
+      background: #121820;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #232b38;
+    }
+    .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; display: inline-block; }
+    .dot-red { background: #ff5f56; }
+    .dot-yellow { background: #ffbd2e; }
+    .dot-green { background: #27c93f; }
+    .terminal-title {
+      color: #8b949e;
+      font-size: 0.82rem;
+      font-family: 'Fira Code', monospace;
+      margin-left: 10px;
+    }
+    .terminal-body {
+      padding: 24px 28px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.92rem;
+      color: #e6edf3;
+      line-height: 1.7;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .t-blue { color: #58a6ff; font-weight: 600; }
+    .t-green { color: #3fb950; font-weight: 500; }
+    .t-cyan { color: #39c5cf; }
+    .t-yellow { color: #e3b341; }
+    .t-gray { color: #768390; }
+
+    /* Feature Cards with Clean Grid */
+    .features-section {
+      width: 100%;
+      margin-bottom: 80px;
+    }
+    .features-header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .features-header h2 {
+      font-size: 2.1rem;
+      color: var(--text-bright);
+      margin-bottom: 12px;
+      letter-spacing: -0.02em;
+    }
+    .features-header p {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 24px;
+      width: 100%;
+    }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 28px;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+    }
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(88, 166, 255, 0.5);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 20px var(--accent-glow);
+    }
+    .feature-card h3 {
+      font-size: 1.25rem;
+      color: var(--text-bright);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+    .feature-card code {
+      font-family: 'Fira Code', monospace;
+      background: rgba(88, 166, 255, 0.1);
+      color: #79c0ff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 48px 0;
+      border-top: 1px solid rgba(48, 54, 61, 0.6);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    footer a { color: var(--text); }
+    footer a:hover { color: var(--accent); }
+
+    @media (max-width: 768px) {
+      h1 { font-size: 2.3rem; }
+      .install-box { flex-direction: column; gap: 14px; text-align: center; }
+      .copy-btn { margin-left: 0; width: 100%; }
+      .terminal-body { font-size: 0.8rem; padding: 18px; }
+      .features-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+      <div class="nav-brand">
+        <svg height="24" viewBox="0 0 16 16" width="24"><path d="M0 2.5A2.5 2.5 0 0 1 2.5 0h8.75a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0V1.5H2.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8.75v-2.75a.75.75 0 0 1 1.5 0v3.5a.75.75 0 0 1-.75.75H2.5A2.5 2.5 0 0 1 0 13.5v-11Zm10.28 3.47a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06l1.72-1.72H5.75a.75.75 0 0 1 0-1.5h6.25l-1.72-1.72a.75.75 0 0 1 0-1.06Z"/></svg>
+        sessionList
+      </div>
+      <div class="nav-links">
+        <a href="https://github.com/AshraArc/-antigravity-chat-manager" target="_blank" class="nav-btn">
+          <svg height="16" viewBox="0 0 16 16" width="16"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+    </nav>
+
+    <!-- Hero Header -->
+    <header>
+      <div class="hero-badges">
+        <span class="badge">Open Source v2.0.0</span>
+        <a href="https://github.com/AshraArc/-antigravity-chat-manager" target="_blank" class="badge badge-star">
+          <svg viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+          AshraArc / -antigravity-chat-manager
+        </a>
+      </div>
+      <h1>The Missing Session Manager<br>for Google Antigravity</h1>
+      <p class="subtitle">Fast interactive dashboard, sub-millisecond search, batch deletions, and clean Markdown exports for power developers using <code>agy</code>.</p>
+      
+      <!-- Installation Command Box -->
+      <div class="install-box">
+        <div class="install-cmd-wrap">
+          <span class="shell-prompt">$</span>
+          <span class="install-cmd" id="installCmd">curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash</span>
+        </div>
+        <button class="copy-btn" onclick="copyInstall()">Copy Command</button>
+      </div>
+    </header>
+
+    <!-- Interactive Terminal Preview -->
+    <div class="terminal-window">
+      <div class="terminal-bar">
+        <span class="dot dot-red"></span>
+        <span class="dot dot-yellow"></span>
+        <span class="dot dot-green"></span>
+        <span class="terminal-title">ashwath@antigravity: ~ (ach)</span>
+      </div>
+      <div class="terminal-body"><span class="t-blue">=== Antigravity Chat Manager (sessionList v2.0.0) ===</span>
+<span class="t-gray">Detected 12 active sessions across project workspaces</span>
+
+  <span class="t-cyan">[1]</span>  <span class="t-yellow">Today 22:30</span>   Implement CI/CD multi-OS automated testing pipeline
+  <span class="t-cyan">[2]</span>  <span class="t-yellow">Today 21:15</span>   Build interactive terminal UI and batch cleanup
+  <span class="t-cyan">[3]</span>  <span class="t-yellow">Yesterday</span>     Add multi-platform backup & index repair engine
+  <span class="t-cyan">[4]</span>  <span class="t-yellow">Nov 18</span>        Investigate session transcript performance
+
+<span class="t-green">Commands:</span> [1-4] Resume | [s] Search | [d 1,2] Batch Delete | [e] Export MD | [q] Quit
+<span class="t-blue">Select option:</span> _</div>
+    </div>
+
+    <!-- Feature Grid with Glow -->
+    <section class="features-section">
+      <div class="features-header">
+        <h2>Built for Speed & Developer Control</h2>
+        <p>Everything the native CLI transcript dump was missing.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>⚡ Instant Sub-Millisecond Speed</h3>
+          <p>Powered by a lean plain-text TSV master index. Search through hundreds of chat sessions in under a millisecond with zero database overhead.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🔍 1-Key Interactive Resume</h3>
+          <p>Say goodbye to copying 36-character UUIDs. Simply press <code>1</code>, <code>2</code>, or use <code>s</code> to jump right back into any session with <code>agy</code>.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🗑️ Batch Cleanup & Pruning</h3>
+          <p>Clean out dead or abandoned chats in bulk with <code>d 1,3,4</code>. Frees up workspace storage and cleans index entries safely with confirmation.</p>
+        </div>
+        <div class="feature-card">
+          <h3>📄 Clean Markdown Export</h3>
+          <p>Convert messy JSONL transcript payloads into readable, formatted Markdown ready for notes, team documentation, or PR summaries.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🛡️ Complete CLI Standards</h3>
+          <p>Includes standard lifecycle flags: <code>--help</code>, <code>--version</code>, <code>--update</code>, and <code>--uninstall</code> right out of the box.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🔄 Self-Healing Recovery</h3>
+          <p>Built-in log repair scans for unindexed sessions and restores damaged or corrupted indexes in seconds without losing transcripts.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <p>Created with care by <a href="https://github.com/AshraArc" target="_blank">AshraArc</a> • Released under the MIT License</p>
+      <p style="margin-top: 10px;">
+        <a href="https://github.com/AshraArc/-antigravity-chat-manager" target="_blank">GitHub Repository</a> • 
+        <a href="https://github.com/AshraArc/-antigravity-chat-manager/issues" target="_blank">Issues & Feedback</a> •
+        <a href="https://github.com/AshraArc/-antigravity-chat-manager/releases" target="_blank">Releases</a>
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    function copyInstall() {
+      const text = document.getElementById('installCmd').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.innerText = 'Copied!';
+        btn.style.color = '#3fb950';
+        btn.style.borderColor = '#3fb950';
+        setTimeout(() => {
+          btn.innerText = 'Copy Command';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
