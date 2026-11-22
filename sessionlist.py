@@ -12,8 +12,12 @@ import glob
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import time
 from datetime import datetime, timedelta
 
@@ -79,6 +83,7 @@ def get_data_dir():
 
 DATA_DIR = get_data_dir()
 MASTER_TSV = os.path.join(DATA_DIR, "master_history.tsv")
+HISTORY_DB = os.path.join(DATA_DIR, "history.db")
 LOCK_FILE = os.path.join(DATA_DIR, "history.lock")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 GROUPS_FILE = os.path.join(DATA_DIR, "groups.txt")
@@ -102,34 +107,279 @@ def get_brain_dir():
 
 BRAIN_DIR = get_brain_dir()
 
+WORKSPACES_FILE = os.path.join(DATA_DIR, "workspaces.json")
+
+def load_workspaces():
+    try:
+        with open(WORKSPACES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_workspace(cid, path):
+    data = load_workspaces()
+    data[cid] = path
+    try:
+        tmp = WORKSPACES_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, WORKSPACES_FILE)
+    except Exception:
+        pass
+
+
+def detect_antigravity_root():
+    """Detects primary Antigravity workspace root."""
+    if os.environ.get("AGY_ROOT") and os.path.isdir(os.environ.get("AGY_ROOT")):
+        return os.path.abspath(os.environ.get("AGY_ROOT"))
+
+    antig_candidates = [
+        "/mnt/a/anti-g",
+        os.path.expanduser("~/anti-g"),
+        os.path.join(os.path.expanduser("~"), "antigravity")
+    ]
+    for cand in antig_candidates:
+        if os.path.isdir(cand):
+            return os.path.abspath(cand)
+
+    # Search standard config or bash profile if available
+    for p in [os.path.expanduser("~/.bashrc"), os.path.expanduser("~/.profile")]:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        m = re.search(r'export\s+(?:AGY_ROOT|ANTIGRAVITY_ROOT)=["\']?([^"\'\s]+)', line)
+                        if m and os.path.isdir(m.group(1)):
+                            return os.path.abspath(m.group(1))
+            except Exception:
+                pass
+
+    # Look upwards from CWD for .agents or .gemini folder
+    try:
+        curr = os.path.abspath(os.getcwd())
+        while curr and curr != os.path.dirname(curr):
+            if os.path.isdir(os.path.join(curr, ".agents")) or os.path.isdir(os.path.join(curr, ".gemini")):
+                return curr
+            curr = os.path.dirname(curr)
+    except Exception:
+        pass
+
+    return None
+
+def infer_workspace(cid):
+    """Best-effort guess of a chat's folder from the directories its tools ran in."""
+    counts = {}
+    fpath = os.path.join(BRAIN_DIR, cid, ".system_generated", "logs", "transcript_full.jsonl")
+    if not os.path.exists(fpath):
+        fpath = os.path.join(BRAIN_DIR, cid, ".system_generated", "logs", "transcript.jsonl")
+    pat = re.compile(r'"(?:Cwd|cwd)":\s*"(/[^"]+)"|\bcd (/[^\s"&;\\]+)')
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                for m in pat.finditer(line):
+                    d = m.group(1) or m.group(2)
+                    if d and os.path.isdir(d):
+                        counts[d] = counts.get(d, 0) + 1
+    except Exception:
+        return None
+    return max(counts, key=counts.get) if counts else None
+
+def scan_project_workspaces(root=None):
+    """
+    Discovers project workspaces under the given root (or default Antigravity root).
+    Scans:
+      - Active git repositories under root/projects
+      - Direct subdirectories and nested versioned project dirs (e.g., v2.1.0/sessionList)
+    """
+    if not root:
+        root = detect_antigravity_root()
+    if not root or not os.path.isdir(root):
+        return []
+
+    projects_dir = os.path.join(root, "projects")
+    if not os.path.isdir(projects_dir):
+        return []
+
+    candidates = []
+    seen = set()
+    ignore = {"__pycache__", "node_modules", ".git", ".idea", ".vscode"}
+
+    # 1. Active git repositories under projects/ (depth <= 4)
+    for dirpath, dirnames, filenames in os.walk(projects_dir):
+        dirnames[:] = [d for d in dirnames if d not in ignore and not d.startswith(".")]
+        if ".git" in os.listdir(dirpath):
+            candidates.append(dirpath)
+            seen.add(dirpath)
+
+    # 2. Direct or versioned project folders under projects/
+    for dirpath, dirnames, filenames in os.walk(projects_dir):
+        dirnames[:] = [d for d in dirnames if d not in ignore and not d.startswith(".")]
+        if dirpath != projects_dir and dirpath not in seen:
+            rel = os.path.relpath(dirpath, projects_dir)
+            parts = rel.split(os.sep)
+            if any(dirpath.startswith(c + os.sep) for c in candidates):
+                continue
+            if len(parts) == 1 or (len(parts) == 2 and parts[0].startswith("v")):
+                candidates.append(dirpath)
+                seen.add(dirpath)
+
+    return candidates
+
+def get_recent_workspaces(limit=10):
+    """
+    Returns a list of unique existing directories used in past sessions or projects.
+    Scans workspaces.json, transcript history, and active git/project repos under root.
+    """
+    seen = set()
+    recent = []
+
+    # 1. From saved workspaces.json
+    workspaces = load_workspaces()
+    for ws in reversed(list(workspaces.values())):
+        if ws and os.path.isdir(ws) and ws not in seen:
+            seen.add(ws)
+            recent.append(ws)
+
+    # 2. From transcript history in brain directory if workspaces.json is sparse
+    for cid_folder in glob.glob(os.path.join(BRAIN_DIR, "*")):
+        cid = os.path.basename(cid_folder)
+        if cid not in workspaces:
+            inferred = infer_workspace(cid)
+            if inferred and os.path.isdir(inferred):
+                save_workspace(cid, inferred)
+                if inferred not in seen:
+                    seen.add(inferred)
+                    recent.append(inferred)
+
+    # 3. Discovered active git repos & project folders under Antigravity Root projects
+    root = detect_antigravity_root()
+    if root:
+        for pdir in scan_project_workspaces(root):
+            if pdir not in seen and os.path.isdir(pdir):
+                seen.add(pdir)
+                recent.append(pdir)
+
+    return recent[:limit]
+
+def select_new_chat_workspace():
+    """
+    Sequential interactive folder picker for starting a new chat.
+    Default is Current Working Directory.
+    Shows Antigravity Root if it exists and != CWD.
+    Cleanly numbers all options sequentially:
+      [1] Current Directory (/home/ashwath)
+      [2] Antigravity Root (/mnt/a/anti-g)
+      [3] /mnt/a/anti-g/projects/sessionList
+      ...
+      [c] Custom Folder Path
+      [q] Cancel
+    """
+    cwd = os.path.abspath(os.getcwd())
+    default_root = detect_antigravity_root()
+
+    all_recent = get_recent_workspaces(10)
+    recent_dirs = [d for d in all_recent if d != cwd and d != default_root]
+
+    clear_screen()
+    print("==================================================")
+    print("          Start New Antigravity Chat              ")
+    print("==================================================")
+    print(f"  [1] Current Directory (Default)")
+    print(f"      -> {cwd}")
+
+    option_map = {1: cwd}
+    next_num = 2
+
+    if default_root and default_root != cwd:
+        print(f"  [{next_num}] Antigravity Root")
+        print(f"      -> {default_root}")
+        option_map[next_num] = default_root
+        next_num += 1
+
+    if recent_dirs:
+        print("\n  Recent Project Workspaces:")
+        for rdir in recent_dirs:
+            print(f"  [{next_num}] {rdir}")
+            option_map[next_num] = rdir
+            next_num += 1
+
+    custom_key = "c"
+    print(f"\n  [{custom_key}] Custom Folder Path (type manually)")
+    print("  [q] Cancel (return to menu)")
+    print("--------------------------------------------------")
+
+    choice = input("Select folder [1]: ").strip()
+
+    if choice.lower() in ("q", "quit", "esc"):
+        return None
+    elif choice == "" or choice == "1":
+        return cwd
+    elif choice.isdigit():
+        sel_idx = int(choice)
+        if sel_idx in option_map:
+            return option_map[sel_idx]
+        return cwd
+    elif choice.lower() == custom_key:
+        p = input("Enter full folder path: ").strip()
+        p = os.path.abspath(os.path.expanduser(p))
+        if os.path.isdir(p):
+            return p
+        else:
+            print(f"Error: Directory not found: {p}")
+            input("Press Enter to continue...")
+            return cwd
+
+    return cwd
+
+def resolve_workspace(cid):
+    ws = load_workspaces().get(cid)
+    if ws and os.path.isdir(ws):
+        return ws
+    ws = infer_workspace(cid)
+    if ws:
+        save_workspace(cid, ws)
+        return ws
+    return None
+
 def clear_screen():
     sys.stdout.write("\033[H\033[2J\033[3J")
     sys.stdout.flush()
 
 class FileLock:
-    """Kernel advisory file lock for safe atomic updates across multiple terminals."""
+    """Advisory file lock for safe atomic updates across multiple terminals."""
     def __init__(self, lock_path):
         self.lock_path = lock_path
         self.file_obj = None
 
     def __enter__(self):
-        self.file_obj = open(self.lock_path, "w+")
-        fcntl.flock(self.file_obj.fileno(), fcntl.LOCK_EX)
+        self.file_obj = open(self.lock_path, "a+")
+        if fcntl:
+            try:
+                fcntl.flock(self.file_obj.fileno(), fcntl.LOCK_EX)
+            except Exception:
+                pass
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.file_obj:
             try:
-                fcntl.flock(self.file_obj.fileno(), fcntl.LOCK_UN)
-                self.file_obj.close()
+                if fcntl:
+                    fcntl.flock(self.file_obj.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
+            finally:
+                try:
+                    self.file_obj.close()
+                except Exception:
+                    pass
 
 def clean_text(text):
     if not text:
         return ""
     text = re.sub(r"<USER_SETTINGS_CHANGE>[\s\S]*?</USER_SETTINGS_CHANGE>", "", text)
     text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -149,11 +399,515 @@ def get_relative_date_label(dt, now):
             return dt.strftime("%b %d")
 
 # ==========================================
-# PLAIN-TEXT MASTER LOG ENGINE (TSV)
+# SQLITE ENGINE & FULL-TEXT SEARCH (FTS5)
 # ==========================================
 
+def get_history_db_path(data_dir=None):
+    base = data_dir if data_dir else DATA_DIR
+    return os.path.join(base, "history.db")
+
+def get_db_connection(db_path=None, read_only=False):
+    """
+    Connects to SQLite database with Antigravity connection standards:
+    WAL mode, NORMAL synchronous, 5000ms busy timeout, foreign keys enabled.
+    """
+    path = db_path if db_path else HISTORY_DB
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    conn = sqlite3.connect(path, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA busy_timeout = 5000;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA cache_size = -4000;")
+    except Exception:
+        pass
+    return conn
+
+def init_db(conn=None, db_path=None):
+    """Initializes tables, indices, and FTS5 search table."""
+    close_after = False
+    if conn is None:
+        conn = get_db_connection(db_path)
+        close_after = True
+
+    try:
+        with conn:
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                conversation_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                relative_time TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                workspace TEXT NOT NULL DEFAULT '',
+                step_count INTEGER NOT NULL DEFAULT 0,
+                last_modified_time REAL NOT NULL DEFAULT 0.0
+            );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_mtime ON sessions(last_modified_time DESC);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_name);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_title ON sessions(title);")
+
+            # FTS5 Virtual Table for full-text search across titles, groups, workspaces, content
+            conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+                conversation_id UNINDEXED,
+                title,
+                group_name,
+                workspace,
+                content,
+                tokenize = 'unicode61 remove_diacritics 2'
+            );
+            """)
+    finally:
+        if close_after:
+            conn.close()
+
+def extract_transcript_full_content(cid):
+    """Extracts first user prompt, turn count, and concatenated textual content for FTS indexing."""
+    cand_paths = [
+        os.path.join(BRAIN_DIR, cid, ".system_generated", "logs", "transcript_full.jsonl"),
+        os.path.join(BRAIN_DIR, cid, ".system_generated", "logs", "transcript.jsonl")
+    ]
+    tpath = None
+    for p in cand_paths:
+        if os.path.exists(p):
+            tpath = p
+            break
+
+    first_prompt = ""
+    turns = 0
+    contents = []
+
+    if tpath:
+        try:
+            with open(tpath, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        t = entry.get("type")
+                        content = clean_text(entry.get("content", ""))
+                        if t == "USER_INPUT":
+                            if content:
+                                turns += 1
+                                if not first_prompt:
+                                    first_prompt = content
+                                contents.append(content)
+                        elif t in ("PLANNER_RESPONSE", "SYSTEM_MESSAGE"):
+                            if content:
+                                if not first_prompt and t == "SYSTEM_MESSAGE":
+                                    first_prompt = content[:45]
+                                contents.append(content)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    if not first_prompt:
+        first_prompt = "(No user input recorded)"
+
+    full_content = " ".join(contents)
+    return first_prompt, turns, full_content
+
+def update_fts_entry(conn, cid, title, group_name, workspace, content=""):
+    """Atomically updates the FTS5 virtual table for a given conversation."""
+    try:
+        conn.execute("DELETE FROM sessions_fts WHERE conversation_id = ?;", (cid,))
+        conn.execute(
+            "INSERT INTO sessions_fts(conversation_id, title, group_name, workspace, content) VALUES (?, ?, ?, ?, ?);",
+            (cid, title, group_name, workspace, content)
+        )
+    except Exception:
+        pass
+
+def migrate_tsv_to_sqlite(db_path=None, tsv_path=None):
+    """
+    On first run or when TSV records exist that are missing from SQLite,
+    reads existing master_history.tsv records into history.db so no history is lost.
+    """
+    db_file = db_path if db_path else HISTORY_DB
+    tsv_file = tsv_path if tsv_path else MASTER_TSV
+    if not os.path.exists(tsv_file):
+        return 0
+
+    init_db(db_path=db_file)
+    conn = get_db_connection(db_file)
+    migrated_count = 0
+    try:
+        workspaces = load_workspaces()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+            existing_cids = {row[0] for row in cur.execute("SELECT conversation_id FROM sessions;").fetchall()}
+
+            tsv_records = []
+            with open(tsv_file, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 5:
+                        cid, mtime_str, msgs_str, group, title = parts[0], parts[1], parts[2], parts[3], parts[4]
+                    elif len(parts) == 4:
+                        cid, mtime_str, msgs_str, group = parts[0], parts[1], parts[2], parts[3]
+                        title = "Untitled Chat"
+                    elif len(parts) >= 2:
+                        cid, mtime_str = parts[0], parts[1]
+                        msgs_str, group, title = "1", "General", "Untitled Chat"
+                    else:
+                        continue
+
+                    try:
+                        mtime = float(mtime_str)
+                    except ValueError:
+                        mtime = 0.0
+                    try:
+                        msgs = int(msgs_str)
+                    except ValueError:
+                        msgs = 1
+
+                    tsv_records.append((cid, mtime, msgs, group, title))
+
+            now = datetime.now()
+            for cid, mtime, msgs, group, title in tsv_records:
+                if cid not in existing_cids:
+                    dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
+                    iso_time = dt.isoformat()
+                    rel_label = get_relative_date_label(dt, now)
+                    ws = workspaces.get(cid, "")
+                    _, _, content = extract_transcript_full_content(cid)
+
+                    cur.execute("""
+                        INSERT OR REPLACE INTO sessions 
+                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
+
+                    update_fts_entry(conn, cid, title, group, ws, content)
+                    existing_cids.add(cid)
+                    migrated_count += 1
+    except Exception as e:
+        print(f"Error during TSV migration: {e}")
+    finally:
+        conn.close()
+
+    return migrated_count
+
+def sync_antigravity_summaries_db(conn=None):
+    """
+    Direct integration with Antigravity's conversation_summaries.db so all native chats
+    are indexed automatically into history.db with FTS.
+    """
+    home = os.path.expanduser("~")
+    cand_paths = [
+        os.path.join(home, ".gemini", "antigravity-cli", "conversation_summaries.db"),
+        os.path.join(home, ".config", "antigravity-cli", "conversation_summaries.db")
+    ]
+    agy_db_path = None
+    for p in cand_paths:
+        if os.path.isfile(p):
+            agy_db_path = p
+            break
+
+    if not agy_db_path:
+        return 0
+
+    close_after = False
+    if conn is None:
+        init_db()
+        conn = get_db_connection()
+        close_after = True
+
+    synced_count = 0
+    try:
+        agy_conn = sqlite3.connect(agy_db_path, timeout=5.0)
+        agy_conn.row_factory = sqlite3.Row
+        cur_agy = agy_conn.cursor()
+
+        # Check if conversation_summaries table exists
+        cur_agy.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='conversation_summaries';")
+        if not cur_agy.fetchone():
+            agy_conn.close()
+            return 0
+
+        rows = cur_agy.execute("""
+            SELECT conversation_id, title, group_id, workspace_uris, step_count, last_modified_time
+            FROM conversation_summaries;
+        """).fetchall()
+
+        now = datetime.now()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+            existing_rows = {
+                r[0]: (r[1], r[2]) for r in cur.execute("SELECT conversation_id, last_modified_time, group_name FROM sessions;").fetchall()
+            }
+
+            for r in rows:
+                cid = r["conversation_id"]
+                title = r["title"] or "Untitled Chat"
+                group = r["group_id"] or "General"
+                ws_uris_raw = r["workspace_uris"] or "[]"
+                ws = ""
+                try:
+                    ws_list = json.loads(ws_uris_raw)
+                    if isinstance(ws_list, list) and ws_list:
+                        ws = ws_list[0]
+                except Exception:
+                    ws = ws_uris_raw
+
+                step_count = r["step_count"] or 0
+                mtime_raw = r["last_modified_time"] or 0.0
+                try:
+                    # mtime could be integer ms or seconds or float
+                    mtime = float(mtime_raw)
+                    if mtime > 1e11:  # milliseconds
+                        mtime /= 1000.0
+                except Exception:
+                    mtime = 0.0
+
+                if cid not in existing_rows or existing_rows[cid][0] < mtime:
+                    # Retain custom group name if already assigned by user
+                    if cid in existing_rows and existing_rows[cid][1] and existing_rows[cid][1] != "General":
+                        group = existing_rows[cid][1]
+
+                    dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
+                    iso_time = dt.isoformat()
+                    rel_label = get_relative_date_label(dt, now)
+                    _, _, content = extract_transcript_full_content(cid)
+
+                    cur.execute("""
+                        INSERT OR REPLACE INTO sessions 
+                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """, (cid, iso_time, rel_label, title, group, ws, step_count, mtime))
+
+                    update_fts_entry(conn, cid, title, group, ws, content)
+                    synced_count += 1
+
+        agy_conn.close()
+    except Exception:
+        pass
+    finally:
+        if close_after:
+            conn.close()
+
+    return synced_count
+
+def sync_active_sessions_to_db(conn=None):
+    """
+    Scans the local sandbox brain directory for active sessions.
+    Indexes them directly into SQLite history.db.
+    """
+    cand_transcripts = glob.glob(os.path.join(BRAIN_DIR, "*", ".system_generated", "logs", "transcript*.jsonl"))
+    if not cand_transcripts:
+        return
+
+    # Filter to most descriptive file per cid (prefer transcript_full.jsonl)
+    cid_files = {}
+    for fpath in cand_transcripts:
+        cid = fpath.split(os.sep)[-4]
+        if cid not in cid_files or "transcript_full" in fpath:
+            cid_files[cid] = fpath
+
+    close_after = False
+    if conn is None:
+        init_db()
+        conn = get_db_connection()
+        close_after = True
+
+    try:
+        now = datetime.now()
+        workspaces = load_workspaces()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+            existing_rows = {
+                r[0]: (r[1], r[2], r[3]) for r in cur.execute("SELECT conversation_id, last_modified_time, group_name, title FROM sessions;").fetchall()
+            }
+
+            for cid, fpath in cid_files.items():
+                mtime = os.path.getmtime(fpath)
+                existing = existing_rows.get(cid)
+
+                if not existing or existing[0] < mtime:
+                    prompt, turns, content = extract_transcript_full_content(cid)
+                    existing_title = existing[2] if existing and existing[2] and existing[2] != "Untitled Chat" else None
+                    title = existing_title or (prompt[:45] + ("..." if len(prompt) > 45 else ""))
+                    group = existing[1] if existing and existing[1] else "General"
+                    ws = workspaces.get(cid) or infer_workspace(cid) or ""
+                    dt = datetime.fromtimestamp(mtime)
+                    iso_time = dt.isoformat()
+                    rel_label = get_relative_date_label(dt, now)
+
+                    cur.execute("""
+                        INSERT OR REPLACE INTO sessions 
+                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """, (cid, iso_time, rel_label, title, group, ws, turns, mtime))
+
+                    update_fts_entry(conn, cid, title, group, ws, content)
+    except Exception:
+        pass
+    finally:
+        if close_after:
+            conn.close()
+
+def read_sessions(db_path=None):
+    """
+    Reads all sessions from SQLite database.
+    Returns list of dicts: {'id', 'mtime', 'msgs', 'group', 'title', 'workspace', 'timestamp', 'relative_time'}
+    """
+    path = db_path if db_path else HISTORY_DB
+    if not os.path.exists(path):
+        return []
+
+    conn = get_db_connection(path)
+    records = []
+    try:
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT conversation_id, last_modified_time, step_count, group_name, title, workspace, timestamp, relative_time
+            FROM sessions
+            ORDER BY last_modified_time DESC;
+        """).fetchall()
+
+        for r in rows:
+            records.append({
+                "id": r["conversation_id"],
+                "mtime": float(r["last_modified_time"] or 0.0),
+                "msgs": int(r["step_count"] or 0),
+                "group": r["group_name"] or "General",
+                "title": r["title"] or "Untitled Chat",
+                "workspace": r["workspace"] or "",
+                "timestamp": r["timestamp"] or "",
+                "relative_time": r["relative_time"] or ""
+            })
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return records
+
+def write_session(session_dict, db_path=None):
+    """
+    Atomically writes or updates a single session in history.db.
+    """
+    path = db_path if db_path else HISTORY_DB
+    init_db(db_path=path)
+    conn = get_db_connection(path)
+    try:
+        cid = session_dict["id"]
+        mtime = float(session_dict.get("mtime", time.time()))
+        msgs = int(session_dict.get("msgs", 0))
+        group = session_dict.get("group", "General")
+        title = session_dict.get("title", "Untitled Chat")
+        ws = session_dict.get("workspace", "")
+        dt = datetime.fromtimestamp(mtime)
+        iso_time = dt.isoformat()
+        rel_label = get_relative_date_label(dt, datetime.now())
+        content = session_dict.get("content", "")
+
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute("""
+                INSERT OR REPLACE INTO sessions 
+                (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
+            update_fts_entry(conn, cid, title, group, ws, content)
+    finally:
+        conn.close()
+
+def search_sessions_fts(query, db_path=None):
+    """
+    High-performance FTS5 full-text search across titles, groups, workspaces, and content.
+    Returns matched records sorted by BM25 relevance score.
+    """
+    path = db_path if db_path else HISTORY_DB
+    if not os.path.exists(path) or not query or not query.strip():
+        return []
+
+    init_db(db_path=path)
+    conn = get_db_connection(path)
+    records = []
+    try:
+        # Sanitize query for FTS5 syntax
+        clean_q = re.sub(r'[^\w\s\*\-]', ' ', query).strip()
+        if not clean_q:
+            return []
+
+        # Construct prefix query tokens
+        tokens = [t + "*" if not t.endswith("*") else t for t in clean_q.split() if t]
+        fts_expr = " ".join(tokens)
+
+        cur = conn.cursor()
+        rows = cur.execute("""
+            SELECT s.conversation_id, s.last_modified_time, s.step_count, s.group_name, s.title, s.workspace, s.timestamp, s.relative_time
+            FROM sessions_fts f
+            JOIN sessions s ON f.conversation_id = s.conversation_id
+            WHERE sessions_fts MATCH ?
+            ORDER BY bm25(sessions_fts) ASC;
+        """, (fts_expr,)).fetchall()
+
+        now = datetime.now()
+        for r in rows:
+            dt = datetime.fromtimestamp(float(r["last_modified_time"] or 0.0))
+            records.append({
+                "id": r["conversation_id"],
+                "mtime": float(r["last_modified_time"] or 0.0),
+                "msgs": int(r["step_count"] or 0),
+                "group": r["group_name"] or "General",
+                "title": r["title"] or "Untitled Chat",
+                "workspace": r["workspace"] or "",
+                "timestamp": r["timestamp"] or "",
+                "relative_time": r["relative_time"] or "",
+                "dt": dt,
+                "time_label": get_relative_date_label(dt, now),
+                "exact_time": dt.strftime("%H:%M")
+            })
+    except Exception:
+        # Fallback to LIKE if FTS expression has syntax quirk
+        try:
+            like_pat = f"%{query.strip()}%"
+            rows = conn.execute("""
+                SELECT conversation_id, last_modified_time, step_count, group_name, title, workspace, timestamp, relative_time
+                FROM sessions
+                WHERE title LIKE ? OR group_name LIKE ? OR workspace LIKE ?
+                ORDER BY last_modified_time DESC;
+            """, (like_pat, like_pat, like_pat)).fetchall()
+            now = datetime.now()
+            for r in rows:
+                dt = datetime.fromtimestamp(float(r["last_modified_time"] or 0.0))
+                records.append({
+                    "id": r["conversation_id"],
+                    "mtime": float(r["last_modified_time"] or 0.0),
+                    "msgs": int(r["step_count"] or 0),
+                    "group": r["group_name"] or "General",
+                    "title": r["title"] or "Untitled Chat",
+                    "workspace": r["workspace"] or "",
+                    "timestamp": r["timestamp"] or "",
+                    "relative_time": r["relative_time"] or "",
+                    "dt": dt,
+                    "time_label": get_relative_date_label(dt, now),
+                    "exact_time": dt.strftime("%H:%M")
+                })
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+    return records
+
+# Backward compatibility TSV helpers
 def read_master_tsv():
-    """Reads all sessions from TSV file in <0.2ms."""
+    """Compatibility helper reading from SQLite history.db (or TSV fallback)."""
+    records = read_sessions()
+    if records:
+        return records
     if not os.path.exists(MASTER_TSV):
         return []
     records = []
@@ -196,32 +950,61 @@ def read_master_tsv():
     return records
 
 def write_master_tsv(records):
-    """Atomically replaces master_history.tsv in <0.5ms."""
+    """Compatibility helper persisting to both history.db and mirror master_history.tsv."""
+    init_db()
+    conn = get_db_connection()
+    try:
+        now = datetime.now()
+        workspaces = load_workspaces()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            cur = conn.cursor()
+            for r in records:
+                cid = str(r["id"]).strip()
+                mtime = float(r["mtime"])
+                msgs = int(r["msgs"])
+                group = str(r.get("group", "General")).strip() or "General"
+                title = str(r.get("title", "Untitled Chat")).strip() or "Untitled Chat"
+                ws = str(r.get("workspace", workspaces.get(cid, "")))
+                dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
+                iso_time = dt.isoformat()
+                rel_label = get_relative_date_label(dt, now)
+
+                cur.execute("""
+                    INSERT OR REPLACE INTO sessions 
+                    (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
+                update_fts_entry(conn, cid, title, group, ws, "")
+    except Exception as e:
+        print(f"Error persisting to SQLite: {e}")
+    finally:
+        conn.close()
+
+    # Also keep master_history.tsv updated for plain-text mirrors/backwards compat
     tmp_path = MASTER_TSV + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             for r in records:
-                cid = r["id"]
+                cid = str(r["id"]).replace("\t", " ").replace("\n", " ").strip()
                 mtime = r["mtime"]
                 msgs = r["msgs"]
-                group = r["group"].replace("\t", " ")
-                title = r["title"].replace("\t", " ").replace("\n", " ")
+                group = str(r.get("group", "General")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "General"
+                title = str(r.get("title", "Untitled Chat")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "Untitled Chat"
                 f.write(f"{cid}\t{mtime}\t{msgs}\t{group}\t{title}\n")
         os.replace(tmp_path, MASTER_TSV)
-        # Mirror backup to plugin_data so both antigravity default locations stay identical
         mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
         if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(MASTER_TSV):
             try:
                 shutil.copy2(MASTER_TSV, os.path.join(mirror_dir, "master_history.tsv"))
             except Exception:
                 pass
-    except Exception as e:
+    except Exception:
         if os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-        print(f"Error persisting TSV: {e}")
 
 def parse_transcript_data(fpath):
     first_prompt = ""
@@ -248,55 +1031,23 @@ def parse_transcript_data(fpath):
     return first_prompt, user_turns
 
 def sync_active_session_to_tsv():
-    """
-    Scans the local sandbox brain directory for this container's active session.
-    Appends or updates its record in master_history.tsv.
-    Takes <1ms when up to date.
-    """
-    pattern = os.path.join(BRAIN_DIR, "*", ".system_generated", "logs", "transcript.jsonl")
-    disk_files = glob.glob(pattern)
-    if not disk_files:
-        return
-
-    with FileLock(LOCK_FILE):
-        records = read_master_tsv()
-        rec_map = {r["id"]: r for r in records}
-        dirty = False
-
-        for fpath in disk_files:
-            cid = fpath.split(os.sep)[-4]
-            mtime = os.path.getmtime(fpath)
-            existing = rec_map.get(cid)
-
-            if not existing:
-                prompt, turns = parse_transcript_data(fpath)
-                title = prompt[:45] + ("..." if len(prompt) > 45 else "")
-                new_rec = {
-                    "id": cid,
-                    "mtime": mtime,
-                    "msgs": turns,
-                    "group": "General",
-                    "title": title
-                }
-                records.append(new_rec)
-                rec_map[cid] = new_rec
-                dirty = True
-            elif existing["mtime"] < mtime:
-                prompt, turns = parse_transcript_data(fpath)
-                existing["mtime"] = mtime
-                existing["msgs"] = turns
-                dirty = True
-
-        if dirty:
-            write_master_tsv(records)
+    """Syncs active session transcripts and Antigravity DB to history.db."""
+    init_db()
+    migrate_tsv_to_sqlite()
+    sync_antigravity_summaries_db()
+    sync_active_sessions_to_db()
 
 def get_all_chats():
-    sync_active_session_to_tsv()
-    records = read_master_tsv()
+    init_db()
+    migrate_tsv_to_sqlite()
+    sync_antigravity_summaries_db()
+    sync_active_sessions_to_db()
+
+    records = read_sessions()
     now = datetime.now()
 
     for c in records:
-        dt = datetime.fromtimestamp(c["mtime"])
+        dt = datetime.fromtimestamp(c["mtime"]) if c["mtime"] > 0 else now
         c["dt"] = dt
         c["time_label"] = get_relative_date_label(dt, now)
         c["exact_time"] = dt.strftime("%H:%M")
@@ -339,24 +1090,42 @@ def render_terminal_table(chats, limit=None):
 # ==========================================
 # MUTATIONS & CLI ACTIONS
 # ==========================================
+# MUTATIONS & CLI ACTIONS
+# ==========================================
 
 def set_chat_title(cid, new_title):
     if not cid or not new_title:
         return
+    sanitized_title = str(new_title).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip()
+    if not sanitized_title:
+        return
+
+    init_db()
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
+            conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
+    finally:
+        conn.close()
+
+    # Sync to TSV mirror
     with FileLock(LOCK_FILE):
         records = read_master_tsv()
-        updated = False
         for r in records:
             if r["id"] == cid:
-                r["title"] = new_title.strip()
-                updated = True
+                r["title"] = sanitized_title
                 break
-        if updated:
-            write_master_tsv(records)
-            print(f"✔ Abstracted title saved: '{new_title.strip()}'")
+        write_master_tsv(records)
+
+    print(f"✔ Abstracted title saved: '{sanitized_title}'")
 
 def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
     if not group_name:
+        return
+    sanitized_group = str(group_name).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip()
+    if not sanitized_group:
         return
     chats = get_all_chats()
     now_ts = datetime.now().timestamp()
@@ -374,16 +1143,189 @@ def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
             matching_ids.add(c["id"])
 
     if not matching_ids:
-        print(f"No chats matched criteria for group '{group_name}'.")
+        print(f"No chats matched criteria for group '{sanitized_group}'.")
         return
+
+    init_db()
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE;")
+            for cid in matching_ids:
+                conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
+                conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
+    finally:
+        conn.close()
 
     with FileLock(LOCK_FILE):
         records = read_master_tsv()
         for r in records:
             if r["id"] in matching_ids:
-                r["group"] = group_name
+                r["group"] = sanitized_group
         write_master_tsv(records)
-        print(f"✔ Successfully assigned {len(matching_ids)} session(s) to group '{group_name}'.")
+
+    print(f"✔ Successfully assigned {len(matching_ids)} session(s) to group '{sanitized_group}'.")
+
+def get_all_data_dirs():
+    """Returns all known sessionlist data directories (active and mirrors)."""
+    home = os.path.expanduser("~")
+    dirs = [
+        DATA_DIR,
+        os.path.join(home, ".gemini", "antigravity-cli", "plugin_data", "sessionlist"),
+        "/mnt/a/anti-g/.agents/sessionlist_data"
+    ]
+    root = detect_antigravity_root()
+    if root:
+        dirs.append(os.path.join(root, ".agents", "sessionlist_data"))
+    unique_dirs = []
+    seen = set()
+    for d in dirs:
+        norm = os.path.abspath(d)
+        if norm not in seen:
+            seen.add(norm)
+            unique_dirs.append(norm)
+    return unique_dirs
+
+def purge_chats_from_all_storage(cids):
+    """
+    Completely and thoroughly purges sessions across all Antigravity CLI storage layers:
+    1. Brain directory: ~/.gemini/antigravity-cli/brain/<cid>/
+    2. Conversations SQLite db: ~/.gemini/antigravity-cli/conversations/<cid>.db*
+    3. Central index conversation_summaries.db:
+       - conversation_summaries
+       - conversations_fts
+       - conversation_parents
+    4. Annotations: ~/.gemini/antigravity-cli/annotations/<cid>.pbtxt
+    5. SQLite history.db and sessions_fts in active and all mirror paths
+    6. TSV and Workspaces across active and all mirror paths:
+       - Purges cids from master_history.tsv in all data dirs
+       - Purges cids from workspaces.json in all data dirs
+    """
+    if not cids:
+        return 0
+    cid_set = set(cids)
+    home = os.path.expanduser("~")
+    agy_cli_dir = os.path.join(home, ".gemini", "antigravity-cli")
+
+    for cid in cid_set:
+        # 1. Brain directory
+        folder = os.path.join(BRAIN_DIR, cid)
+        if os.path.exists(folder):
+            try:
+                shutil.rmtree(folder, ignore_errors=True)
+            except Exception:
+                pass
+
+        # 2. Conversations SQLite db (*.db, *.db-wal, *.db-shm)
+        conv_dir = os.path.join(agy_cli_dir, "conversations")
+        for f in glob.glob(os.path.join(conv_dir, f"{cid}.db*")):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+
+        # 4. Annotations
+        annot_path = os.path.join(agy_cli_dir, "annotations", f"{cid}.pbtxt")
+        if os.path.exists(annot_path):
+            try:
+                os.remove(annot_path)
+            except Exception:
+                pass
+
+    # 3. Central index conversation_summaries.db
+    sum_db = os.path.join(agy_cli_dir, "conversation_summaries.db")
+    if os.path.exists(sum_db):
+        try:
+            conn = sqlite3.connect(sum_db, timeout=5.0)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+            tables = {row[0] for row in cur.fetchall()}
+
+            for cid in cid_set:
+                if "conversation_summaries" in tables:
+                    try:
+                        cur.execute("DELETE FROM conversation_summaries WHERE conversation_id = ?;", (cid,))
+                    except Exception:
+                        pass
+                if "conversations_fts" in tables:
+                    try:
+                        cur.execute("DELETE FROM conversations_fts WHERE conversation_id = ?;", (cid,))
+                    except Exception:
+                        pass
+                if "conversation_parents" in tables:
+                    try:
+                        cur.execute("DELETE FROM conversation_parents WHERE conversation_id = ? OR parent_id = ?;", (cid, cid))
+                    except Exception:
+                        pass
+
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    # 5. SQLite history.db and sessions_fts across active and all mirror data paths
+    all_dirs = get_all_data_dirs()
+    for d in all_dirs:
+        db_file = os.path.join(d, "history.db")
+        if os.path.exists(db_file):
+            try:
+                conn_h = get_db_connection(db_file)
+                with conn_h:
+                    conn_h.execute("BEGIN IMMEDIATE;")
+                    cur_h = conn_h.cursor()
+                    cur_h.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+                    t_names = {row[0] for row in cur_h.fetchall()}
+                    for cid in cid_set:
+                        if "sessions" in t_names:
+                            cur_h.execute("DELETE FROM sessions WHERE conversation_id = ?;", (cid,))
+                        if "sessions_fts" in t_names:
+                            cur_h.execute("DELETE FROM sessions_fts WHERE conversation_id = ?;", (cid,))
+                conn_h.close()
+            except Exception:
+                pass
+
+        # Clean master_history.tsv
+        tsv_path = os.path.join(d, "master_history.tsv")
+        if os.path.exists(tsv_path):
+            try:
+                lines_kept = []
+                with open(tsv_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line_str = line.strip()
+                        if not line_str:
+                            continue
+                        parts = line_str.split("\t")
+                        if parts and parts[0] in cid_set:
+                            continue
+                        lines_kept.append(line)
+                tmp_tsv = tsv_path + ".tmp"
+                with open(tmp_tsv, "w", encoding="utf-8") as f:
+                    f.writelines(lines_kept)
+                os.replace(tmp_tsv, tsv_path)
+            except Exception:
+                pass
+
+        # Clean workspaces.json
+        ws_path = os.path.join(d, "workspaces.json")
+        if os.path.exists(ws_path):
+            try:
+                with open(ws_path, "r", encoding="utf-8") as f:
+                    ws_data = json.load(f)
+                if isinstance(ws_data, dict):
+                    modified = False
+                    for cid in cid_set:
+                        if cid in ws_data:
+                            del ws_data[cid]
+                            modified = True
+                    if modified:
+                        tmp_ws = ws_path + ".tmp"
+                        with open(tmp_ws, "w", encoding="utf-8") as f:
+                            json.dump(ws_data, f, indent=1)
+                        os.replace(tmp_ws, ws_path)
+            except Exception:
+                pass
+
+    return len(cid_set)
 
 def delete_chats_multi(chats_to_delete):
     if not chats_to_delete:
@@ -394,18 +1336,9 @@ def delete_chats_multi(chats_to_delete):
 
     confirm = input(f"\nAre you sure you want to delete? (y/N): ").strip().lower()
     if confirm == "y":
-        del_ids = {c["id"] for c in chats_to_delete}
-        for c in chats_to_delete:
-            folder = os.path.join(BRAIN_DIR, c["id"])
-            if os.path.exists(folder):
-                try:
-                    shutil.rmtree(folder)
-                except Exception:
-                    pass
+        del_ids = [c["id"] for c in chats_to_delete]
         with FileLock(LOCK_FILE):
-            records = read_master_tsv()
-            records = [r for r in records if r["id"] not in del_ids]
-            write_master_tsv(records)
+            purge_chats_from_all_storage(del_ids)
         print(f"\n✔ Deleted {len(chats_to_delete)} chat(s). Refreshing...")
         time.sleep(0.5)
 
@@ -527,21 +1460,36 @@ def move_or_rename_chat(chat):
     new_title = input(f"New title [Enter to keep: '{chat['title']}']: ").strip()
     new_group = input(f"Assign to group [Enter to keep: '{chat['group']}']: ").strip()
 
-    with FileLock(LOCK_FILE):
-        records = read_master_tsv()
-        updated = False
-        for r in records:
-            if r["id"] == cid:
-                if new_title:
-                    r["title"] = new_title
-                if new_group:
-                    r["group"] = new_group
-                updated = True
-                break
-        if updated:
+    title_val = new_title.replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() if new_title else None
+    group_val = new_group.replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() if new_group else None
+
+    if title_val or group_val:
+        init_db()
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE;")
+                if title_val:
+                    conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (title_val, cid))
+                    conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (title_val, cid))
+                if group_val:
+                    conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
+                    conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
+        finally:
+            conn.close()
+
+        with FileLock(LOCK_FILE):
+            records = read_master_tsv()
+            for r in records:
+                if r["id"] == cid:
+                    if title_val:
+                        r["title"] = title_val
+                    if group_val:
+                        r["group"] = group_val
+                    break
             write_master_tsv(records)
-            print("\n✔ Updated. Refreshing...")
-            time.sleep(0.5)
+        print("\n✔ Updated. Refreshing...")
+        time.sleep(0.5)
 
 def configure_alias_interactive():
     clear_screen()
@@ -648,38 +1596,46 @@ def configure_time_window():
 
 def show_storage_info():
     clear_screen()
-    records = read_master_tsv()
-    size_bytes = os.path.getsize(MASTER_TSV) if os.path.exists(MASTER_TSV) else 0
+    records = get_all_chats()
+    db_size = os.path.getsize(HISTORY_DB) if os.path.exists(HISTORY_DB) else 0
+    tsv_size = os.path.getsize(MASTER_TSV) if os.path.exists(MASTER_TSV) else 0
 
     print("==========================================")
     print("         Storage & Diagnostics            ")
     print("==========================================")
     print(f"  Data Directory:      {DATA_DIR}")
-    print(f"  Master History TSV:  {MASTER_TSV}")
+    print(f"  SQLite Database:     {HISTORY_DB}")
+    print(f"  DB Size on Disk:     {db_size} bytes ({db_size/1024:.2f} KB)")
+    print(f"  Master History TSV:  {MASTER_TSV} ({tsv_size/1024:.2f} KB)")
     print(f"  Total Chats Saved:   {len(records)} sessions")
-    print(f"  File Size on Disk:   {size_bytes} bytes ({size_bytes/1024:.2f} KB)")
     print(f"  Antigravity Brain:   {BRAIN_DIR}")
     print("------------------------------------------")
     get_prompt_input("Press Enter or ESC to return...")
 
 def backup_history_log():
     clear_screen()
-    if not os.path.exists(MASTER_TSV):
-        print("No master_history.tsv found to backup.")
+    if not os.path.exists(HISTORY_DB) and not os.path.exists(MASTER_TSV):
+        print("No history database or TSV found to backup.")
         time.sleep(1)
         return
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    bak_name = f"master_history_backup_{ts}.tsv"
-    bak_path = os.path.join(DATA_DIR, bak_name)
+    bak_db_name = f"history_backup_{ts}.db"
+    bak_db_path = os.path.join(DATA_DIR, bak_db_name)
+    bak_tsv_name = f"master_history_backup_{ts}.tsv"
+    bak_tsv_path = os.path.join(DATA_DIR, bak_tsv_name)
 
     try:
-        shutil.copy2(MASTER_TSV, bak_path)
+        if os.path.exists(HISTORY_DB):
+            shutil.copy2(HISTORY_DB, bak_db_path)
+        if os.path.exists(MASTER_TSV):
+            shutil.copy2(MASTER_TSV, bak_tsv_path)
+
         print("==========================================")
         print("          History Backup Created          ")
         print("==========================================")
-        print(f"  Backup saved to:")
-        print(f"  {bak_path}")
+        print(f"  SQLite DB Backup saved to:")
+        print(f"  {bak_db_path}")
         print("------------------------------------------")
     except Exception as e:
         print(f"Error creating backup: {e}")
@@ -689,11 +1645,13 @@ def backup_history_log():
 def restore_history_log():
     clear_screen()
     print("==========================================")
-    print("         Restore History Log (TSV)        ")
+    print("         Restore History Log (SQLite)     ")
     print("==========================================")
     
-    # Look for available backups in DATA_DIR
-    baks = sorted(glob.glob(os.path.join(DATA_DIR, "master_history_backup_*.tsv")), reverse=True)
+    # Look for available backups in DATA_DIR (both DB and TSV)
+    db_baks = sorted(glob.glob(os.path.join(DATA_DIR, "history_backup_*.db")), reverse=True)
+    tsv_baks = sorted(glob.glob(os.path.join(DATA_DIR, "master_history_backup_*.tsv")), reverse=True)
+    baks = db_baks + tsv_baks
     if not baks:
         print("  No previous backups found in:")
         print(f"  {DATA_DIR}")
@@ -714,49 +1672,28 @@ def restore_history_log():
         selected_bak = baks[int(choice) - 1]
         try:
             with FileLock(LOCK_FILE):
-                shutil.copy2(selected_bak, MASTER_TSV)
-                # Mirror to plugin_data if applicable
-                mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
-                if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(MASTER_TSV):
-                    shutil.copy2(MASTER_TSV, os.path.join(mirror_dir, "master_history.tsv"))
+                if selected_bak.endswith(".db"):
+                    shutil.copy2(selected_bak, HISTORY_DB)
+                    # Mirror to plugin_data if applicable
+                    mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
+                    if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(HISTORY_DB):
+                        shutil.copy2(HISTORY_DB, os.path.join(mirror_dir, "history.db"))
+                elif selected_bak.endswith(".tsv"):
+                    shutil.copy2(selected_bak, MASTER_TSV)
+                    migrate_tsv_to_sqlite(tsv_path=selected_bak)
             print(f"\n✔ Successfully restored master history from:")
             print(f"  {os.path.basename(selected_bak)}")
         except Exception as e:
             print(f"\nError restoring backup: {e}")
         time.sleep(1.5)
 
-def export_chat_to_markdown():
-    clear_screen()
-    chats = get_all_chats()
-    if not chats:
-        print("No chats found to export.")
-        time.sleep(1)
-        return
-
-    print("==========================================")
-    print("        Export Conversation to MD         ")
-    print("==========================================")
-    for idx, c in enumerate(chats[:15], 1):
-        print(f"  [{idx:2d}] {c['time_label']:<10} {c['title'][:36]}")
-    print("------------------------------------------")
-    print("Options: <num> export chat | 'all' export all | ESC back")
-    choice = get_prompt_input("Select > ").strip().lower()
-
-    if choice in ("b", "back", "q", "quit", "esc", ""):
-        return
+def do_export_chats(targets):
+    if not targets:
+        print("No chats to export.")
+        return 0, ""
 
     export_dir = os.path.abspath(os.path.join(DATA_DIR, "..", "exported_chats"))
     os.makedirs(export_dir, exist_ok=True)
-
-    targets = []
-    if choice == "all":
-        targets = chats
-    elif choice.isdigit() and 1 <= int(choice) <= len(chats):
-        targets = [chats[int(choice) - 1]]
-    else:
-        print("Invalid choice.")
-        time.sleep(1)
-        return
 
     exported_count = 0
     for c in targets:
@@ -775,7 +1712,8 @@ def export_chat_to_markdown():
         clean_slug = re.sub(r"[^\w\-_\. ]", "_", c["title"]).strip().replace(" ", "_")[:35]
         if not clean_slug:
             clean_slug = "chat"
-        md_filename = f"{c['exact_time'].replace(':', '')}_{clean_slug}_{cid[:6]}.md"
+        time_part = c.get("exact_time", "").replace(":", "") if c.get("exact_time") else "0000"
+        md_filename = f"{time_part}_{clean_slug}_{cid[:6]}.md"
         out_path = os.path.join(export_dir, md_filename)
 
         md_lines = [
@@ -815,6 +1753,39 @@ def export_chat_to_markdown():
             f.writelines(md_lines)
         exported_count += 1
 
+    return exported_count, export_dir
+
+def export_chat_to_markdown():
+    clear_screen()
+    chats = get_all_chats()
+    if not chats:
+        print("No chats found to export.")
+        time.sleep(1)
+        return
+
+    print("==========================================")
+    print("        Export Conversation to MD         ")
+    print("==========================================")
+    for idx, c in enumerate(chats[:15], 1):
+        print(f"  [{idx:2d}] {c['time_label']:<10} {c['title'][:36]}")
+    print("------------------------------------------")
+    print("Options: <num> export chat | 'all' export all | ESC back")
+    choice = get_prompt_input("Select > ").strip().lower()
+
+    if choice in ("b", "back", "q", "quit", "esc", ""):
+        return
+
+    targets = []
+    if choice == "all":
+        targets = chats
+    elif choice.isdigit() and 1 <= int(choice) <= len(chats):
+        targets = [chats[int(choice) - 1]]
+    else:
+        print("Invalid choice.")
+        time.sleep(1)
+        return
+
+    exported_count, export_dir = do_export_chats(targets)
     print(f"\n✔ Successfully exported {exported_count} conversation(s) to:")
     print(f"  {export_dir}")
     get_prompt_input("\nPress Enter or ESC to return...")
@@ -911,30 +1882,71 @@ def settings_view():
         elif choice == "7":
             uninstall_sessionlist()
 
-def start_new_chat():
+def _exec_agy(extra_args):
+    """Clean process hand-off replacing current Python process when possible."""
     cli_cmd = detect_cli_command()
-    clear_screen()
-    print("Launching new Antigravity chat session...")
-    parts = cli_cmd.split()
-    cmd_binary = parts[0]
-    args = parts
+    parts = cli_cmd.split() + extra_args
+    binary = parts[0]
+    resolved_bin = shutil.which(binary) if not os.path.isabs(binary) else binary
+    if resolved_bin and hasattr(os, "execvp"):
+        try:
+            os.execvp(resolved_bin, [resolved_bin] + parts[1:])
+        except Exception:
+            pass
+    # Fallback to subprocess if execvp fails or not available
     try:
-        os.execvp(cmd_binary, args)
+        rc = subprocess.call(parts)
     except FileNotFoundError:
-        subprocess.call(cli_cmd, shell=True, executable="/bin/bash")
-        sys.exit(0)
+        rc = subprocess.call(" ".join(parts), shell=True)
+    sys.exit(rc or 0)
+
+def _run_agy(extra_args):
+    cli_cmd = detect_cli_command()
+    parts = cli_cmd.split() + extra_args
+    try:
+        return subprocess.call(parts)
+    except FileNotFoundError:
+        return subprocess.call(" ".join(parts), shell=True)
+
+def _brain_ids():
+    try:
+        return {d for d in os.listdir(BRAIN_DIR) if os.path.isdir(os.path.join(BRAIN_DIR, d))}
+    except Exception:
+        return set()
+
+def start_new_chat():
+    chosen_ws = select_new_chat_workspace()
+    if not chosen_ws:
+        return
+    try:
+        os.chdir(chosen_ws)
+    except OSError as e:
+        print(f"Cannot switch to {chosen_ws}: {e}")
+        input("Press Enter to continue...")
+        return
+    clear_screen()
+    print(f"Launching new Antigravity chat in {chosen_ws}...")
+    _exec_agy([])
 
 def resume_chat(cid):
-    cli_cmd = detect_cli_command()
-    clear_screen()
-    parts = cli_cmd.split()
-    cmd_binary = parts[0]
-    args = parts + ["--conversation", cid]
+    """Resume inside the chat's original folder so agy does not ask to trust a new one."""
+    ws = resolve_workspace(cid)
+    if not ws:
+        print("\nOriginal folder of this chat is unknown.")
+        ans = input(f"Folder to resume in [{os.getcwd()}]: ").strip()
+        ws = os.path.expanduser(ans) if ans else os.getcwd()
+        if not os.path.isdir(ws):
+            print(f"Not a folder: {ws}")
+            return
+        save_workspace(cid, ws)
     try:
-        os.execvp(cmd_binary, args)
-    except FileNotFoundError:
-        subprocess.call(f"{cli_cmd} --conversation {cid}", shell=True, executable="/bin/bash")
-        sys.exit(0)
+        os.chdir(ws)
+    except OSError as e:
+        print(f"Cannot enter {ws}: {e}")
+        return
+    clear_screen()
+    print(f"Resuming in {ws} ...")
+    _exec_agy(["--conversation", cid])
 
 # ==========================================
 # INTERACTIVE TERMINAL VIEWS (ach)
@@ -950,7 +1962,7 @@ def all_chats_view():
         print("                All Chats                 ")
         print("==========================================")
         render_terminal_table(chats, limit=None)
-        print("\nCmds: <num> resume | e <num> edit | d <n1,n2..> del | n new | Esc/b back")
+        print("\nCmds: <num> resume | e <num> edit | x <num|all> export | d <n1,n2..> del | n new | Esc/b back")
         cmd = get_prompt_input("Select > ")
 
         if cmd.lower() in ("b", "back", "q", "quit", "esc"):
@@ -962,6 +1974,22 @@ def all_chats_view():
             part = cmd[2:].strip()
             if part.isdigit() and 1 <= int(part) <= len(chats):
                 move_or_rename_chat(chats[int(part) - 1])
+        elif cmd.lower().startswith("x ") or cmd.lower() == "x":
+            part = cmd[2:].strip().lower() if len(cmd) > 1 else ""
+            if not part:
+                part = get_prompt_input("Export chat number or 'all': ").strip().lower()
+            if part == "all":
+                count, edir = do_export_chats(chats)
+                print(f"\n✔ Successfully exported {count} conversation(s) to:\n  {edir}")
+                input("Press Enter to continue...")
+            elif part.isdigit() and 1 <= int(part) <= len(chats):
+                target = chats[int(part) - 1]
+                count, edir = do_export_chats([target])
+                print(f"\n✔ Successfully exported '{target['title']}' to:\n  {edir}")
+                input("Press Enter to continue...")
+            else:
+                print("Invalid export option. Usage: x <num> or x all")
+                time.sleep(1)
         elif cmd.lower().startswith("d ") or cmd.lower().startswith("del ") or cmd.lower().startswith("d,") or cmd.lower().startswith("del,"):
             raw_input = re.sub(r"^(del|d)[\s,]*", "", cmd, flags=re.I).strip()
             tokens = re.split(r"[\s,]+", raw_input)
@@ -982,9 +2010,12 @@ def all_chats_view():
             resume_chat(chats[int(cmd) - 1]["id"])
 
 def search_chats_cli(query):
-    chats = get_all_chats()
-    q = query.lower()
-    matched = [c for c in chats if q in c["title"].lower() or q in c["group"].lower() or q in c["time_label"].lower()]
+    matched = search_sessions_fts(query)
+    if not matched:
+        # Fallback to simple title/group substring filter
+        chats = get_all_chats()
+        q = query.lower()
+        matched = [c for c in chats if q in c["title"].lower() or q in c["group"].lower() or q in c["time_label"].lower()]
     print(f"Found {len(matched)} chat(s) matching '{query}':")
     render_terminal_table(matched)
 
@@ -1001,7 +2032,7 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v"):
-            print("sessionList v2.0.0 (by AshraArc)")
+            print("sessionList v2.1.0 (by AshraArc)")
             return
         elif arg in ("--update", "update"):
             install_base = os.path.expanduser("~/.local/share/sessionlist")
@@ -1014,38 +2045,106 @@ def main():
                     print(f"Error checking updates: {e}")
             else:
                 print("To update, run:")
-                print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash")
+                print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | sh")
             return
         elif arg == "--uninstall":
             uninstall_sessionlist()
             return
         elif arg in ("--help", "-h"):
-            print("""sessionList v2.0.0 — Unified Antigravity Session Manager
+            print("""sessionList v2.1.0 — Unified Antigravity Session Manager
 Usage:
+  ach [options]             Session manager CLI
   <cmd>-h [options]         Quick non-interactive table dump
   <cmd>-m                   Interactive dashboard menu
 
 Options:
-  --help, -h                Show this help message
-  --version, -v             Show version information
-  --update                  Check and pull latest updates
-  --uninstall               Uninstall sessionList and its shortcuts
-  --list                    Show recent chats (default for <cmd>-h)
-  --all                     Show complete uncapped history
-  --days <N>, -d <N>        Filter chats from the last N days (e.g. --days 7)
-  --hours <N>, -H <N>       Filter chats from the last N hours (e.g. --hours 2)
-  --search-cli <query>      Search chat titles and notebook groups
+  -h, --help                Show this help message
+  -v, --version             Show version information
+  -l, --list                Show recent chats (default for <cmd>-h)
+  -a, --all, --list-all     Show complete uncapped history
+  -s, --search, --search-cli <query> Search chat titles, history and notebooks
+  -x, --export <id|all>     Export session(s) directly to Markdown (.md)
+  -d, --delete, --del, rm <ids...> Delete session(s) non-interactively (e.g. -d 1,2 or rm 1-3)
+  --days <N>                Filter chats from the last N days (e.g. --days 7)
+  -H, --hours <N>           Filter chats from the last N hours (e.g. --hours 2)
   --groups-cli              List all notebook groups
   --set-title <id> "<title>" Set clean abstracted session title
+  --update                  Check and pull latest updates
+  --uninstall               Uninstall sessionList and its shortcuts
 """)
             return
-        elif arg == "--list":
+        elif arg in ("--export", "-x"):
+            target_arg = sys.argv[2] if len(sys.argv) > 2 else "all"
+            chats = get_all_chats()
+            targets = []
+            if target_arg.lower() == "all":
+                targets = chats
+            elif target_arg.isdigit():
+                idx = int(target_arg)
+                if 1 <= idx <= len(chats):
+                    targets = [chats[idx - 1]]
+                else:
+                    print(f"Error: Chat index {idx} out of range (1-{len(chats)}).")
+                    return
+            else:
+                # Try matching by CID
+                matched = [c for c in chats if c["id"].startswith(target_arg)]
+                if matched:
+                    targets = [matched[0]]
+                else:
+                    print(f"Error: No chat found matching identifier '{target_arg}'.")
+                    return
+            count, edir = do_export_chats(targets)
+            print(f"✔ Successfully exported {count} conversation(s) to:\n  {edir}")
+            return
+        elif arg in ("--delete", "--del", "-d", "rm"):
+            raw_args = sys.argv[2:] if len(sys.argv) > 2 else []
+            if not raw_args:
+                print("Error: Missing session ID(s) to delete. Example: -d 1,2 or rm 1-3")
+                return
+            chats = get_all_chats()
+            tokens = []
+            for item in raw_args:
+                tokens.extend(re.split(r"[\s,]+", item.strip()))
+            selected = []
+            for t in tokens:
+                if not t:
+                    continue
+                m = re.match(r"^(\d+)-(\d+)$", t)
+                if m:
+                    start, end = int(m.group(1)), int(m.group(2))
+                    if start > end:
+                        start, end = end, start
+                    for idx in range(start, end + 1):
+                        if 1 <= idx <= len(chats):
+                            target = chats[idx - 1]
+                            if target not in selected:
+                                selected.append(target)
+                elif t.isdigit():
+                    idx = int(t)
+                    if 1 <= idx <= len(chats):
+                        target = chats[idx - 1]
+                        if target not in selected:
+                            selected.append(target)
+                else:
+                    for c in chats:
+                        if c["id"].startswith(t) and c not in selected:
+                            selected.append(c)
+            if selected:
+                del_ids = [c["id"] for c in selected]
+                with FileLock(LOCK_FILE):
+                    purge_chats_from_all_storage(del_ids)
+                print(f"✔ Deleted {len(selected)} chat(s).")
+            else:
+                print(f"No chats matched '{' '.join(raw_args)}'.")
+            return
+        elif arg in ("--list", "-l"):
             render_terminal_table(get_all_chats(), limit=15)
             return
-        elif arg in ("--all", "--list-all"):
+        elif arg in ("--all", "--list-all", "-a"):
             render_terminal_table(get_all_chats(), limit=None)
             return
-        elif arg in ("--days", "-d"):
+        elif arg in ("--days",):
             days = float(sys.argv[2]) if len(sys.argv) > 2 else 7.0
             now_ts = datetime.now().timestamp()
             chats = [c for c in get_all_chats() if (now_ts - c["mtime"]) <= (days * 86400)]
@@ -1057,7 +2156,7 @@ Options:
             chats = [c for c in get_all_chats() if (now_ts - c["mtime"]) <= (hours * 3600)]
             render_terminal_table(chats)
             return
-        elif arg == "--search-cli":
+        elif arg in ("--search", "-s", "--search-cli"):
             q = sys.argv[2] if len(sys.argv) > 2 else ""
             search_chats_cli(q)
             return
@@ -1111,7 +2210,9 @@ Options:
                     start_new_chat()
                     break
                 elif sub.isdigit():
-                    matched = [c for c in get_all_chats() if q.lower() in c["title"].lower() or q.lower() in c["group"].lower() or q.lower() in c["time_label"].lower()]
+                    matched = search_sessions_fts(q)
+                    if not matched:
+                        matched = [c for c in get_all_chats() if q.lower() in c["title"].lower() or q.lower() in c["group"].lower() or q.lower() in c["time_label"].lower()]
                     if 1 <= int(sub) <= len(matched):
                         resume_chat(matched[int(sub) - 1]["id"])
                         break

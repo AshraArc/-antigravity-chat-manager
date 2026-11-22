@@ -5,7 +5,7 @@ description: High-efficiency session history and notebook lookup for Antigravity
 
 # sessionList Skill
 
-Direct, zero-token overhead session history recall from `master_history.tsv`.
+Direct, zero-token overhead session history recall from `history.db` (SQLite WAL + FTS5 full-text engine).
 
 ## FAST PATH (Standard In-Chat History)
 

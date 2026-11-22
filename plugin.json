@@ -1,13 +1,13 @@
 {
   "name": "sessionlist",
   "displayName": "sessionList",
-  "version": "2.0.0",
-  "description": "Unified session manager for Antigravity: interactive CLI browser in the terminal, /history slash command in chat",
+  "version": "2.1.0",
+  "description": "Companion tool for Antigravity: export chats to Markdown, batch delete, groups and history backup",
   "author": {
     "name": "AshraArc",
-    "url": "https://github.com/AshraArc/sessionList"
+    "url": "https://github.com/AshraArc/-antigravity-chat-manager"
   },
-  "repository": "https://github.com/AshraArc/sessionList",
+  "repository": "https://github.com/AshraArc/-antigravity-chat-manager.git",
   "license": "MIT",
   "keywords": [
     "sessionlist",
