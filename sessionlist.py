@@ -262,9 +262,9 @@ def get_recent_workspaces(limit=10):
 
     return recent[:limit]
 
-def select_new_chat_workspace():
+def select_new_chat_workspace(title="Start New Antigravity Chat", prompt="Select folder [1]: ", current_ws=None):
     """
-    Sequential interactive folder picker for starting a new chat.
+    Sequential interactive folder picker for starting or moving a chat.
     Default is Current Working Directory.
     Shows Antigravity Root if it exists and != CWD.
     Cleanly numbers all options sequentially:
@@ -283,8 +283,11 @@ def select_new_chat_workspace():
 
     clear_screen()
     print("==================================================")
-    print("          Start New Antigravity Chat              ")
+    print(f"          {title.center(38)}              ")
     print("==================================================")
+    if current_ws:
+        print(f"  Current workspace: {current_ws}")
+        print("--------------------------------------------------")
     print(f"  [1] Current Directory (Default)")
     print(f"      -> {cwd}")
 
@@ -309,7 +312,7 @@ def select_new_chat_workspace():
     print("  [q] Cancel (return to menu)")
     print("--------------------------------------------------")
 
-    choice = input("Select folder [1]: ").strip()
+    choice = input(prompt).strip()
 
     if choice.lower() in ("q", "quit", "esc"):
         return None
@@ -328,7 +331,7 @@ def select_new_chat_workspace():
         else:
             print(f"Error: Directory not found: {p}")
             input("Press Enter to continue...")
-            return cwd
+            return None
 
     return cwd
 
@@ -1491,6 +1494,130 @@ def move_or_rename_chat(chat):
         print("\n✔ Updated. Refreshing...")
         time.sleep(0.5)
 
+def transplant_conversations(cids, new_workspace, target_db_path=None):
+    """
+    Transplants conversations across directories/workspaces:
+    1. Validates and ensures new_workspace is absolute and existing.
+    2. Updates Antigravity central index (target_db_path or ~/.gemini/antigravity-cli/conversation_summaries.db):
+       - UPDATE conversation_summaries SET workspace_uris = ? WHERE conversation_id = ?
+       - UPDATE conversations_fts SET workspace = ? WHERE conversation_id = ?
+    3. Updates history.db across active and mirror paths:
+       - UPDATE sessions SET workspace = ? WHERE conversation_id = ?
+       - UPDATE sessions_fts
+    4. Updates master_history.tsv
+    5. Updates workspaces.json across all data paths (save_workspace).
+    Returns (success_count, absolute_workspace_path).
+    """
+    if not cids:
+        return 0, None
+    if not new_workspace:
+        raise ValueError("Target workspace path cannot be empty.")
+
+    abs_ws = os.path.abspath(os.path.expanduser(str(new_workspace).strip()))
+    if not os.path.isdir(abs_ws):
+        raise ValueError(f"Target workspace directory does not exist: {abs_ws}")
+
+    cid_list = list(cids)
+    ws_uri_json = json.dumps(["file://" + abs_ws])
+
+    # 1. Antigravity central index: conversation_summaries.db
+    home = os.path.expanduser("~")
+    sum_db_candidates = []
+    if target_db_path:
+        sum_db_candidates.append(target_db_path)
+    if os.environ.get("AGY_SUMMARIES_DB"):
+        sum_db_candidates.append(os.environ.get("AGY_SUMMARIES_DB"))
+    sum_db_candidates.extend([
+        os.path.join(home, ".gemini", "antigravity-cli", "conversation_summaries.db"),
+        os.path.join(home, ".config", "antigravity-cli", "conversation_summaries.db")
+    ])
+    for sdb in sum_db_candidates:
+        if os.path.isfile(sdb):
+            try:
+                conn_sum = sqlite3.connect(sdb, timeout=5.0)
+                cur_sum = conn_sum.cursor()
+                cur_sum.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+                tables = {row[0] for row in cur_sum.fetchall()}
+                with conn_sum:
+                    for cid in cid_list:
+                        if "conversation_summaries" in tables:
+                            try:
+                                cur_sum.execute(
+                                    "UPDATE conversation_summaries SET workspace_uris = ? WHERE conversation_id = ?;",
+                                    (ws_uri_json, cid)
+                                )
+                            except Exception:
+                                pass
+                        if "conversations_fts" in tables:
+                            try:
+                                cur_sum.execute(
+                                    "UPDATE conversations_fts SET workspace = ? WHERE conversation_id = ?;",
+                                    (abs_ws, cid)
+                                )
+                            except Exception:
+                                pass
+                conn_sum.close()
+            except Exception:
+                pass
+
+    # 2. Update history.db and sessions_fts across all known data dirs
+    all_dirs = get_all_data_dirs()
+    for d in all_dirs:
+        hdb = os.path.join(d, "history.db")
+        if os.path.exists(hdb):
+            try:
+                conn_h = get_db_connection(hdb)
+                with conn_h:
+                    conn_h.execute("BEGIN IMMEDIATE;")
+                    cur_h = conn_h.cursor()
+                    cur_h.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+                    t_names = {row[0] for row in cur_h.fetchall()}
+                    for cid in cid_list:
+                        if "sessions" in t_names:
+                            cur_h.execute(
+                                "UPDATE sessions SET workspace = ? WHERE conversation_id = ?;",
+                                (abs_ws, cid)
+                            )
+                        if "sessions_fts" in t_names:
+                            row = cur_h.execute(
+                                "SELECT title, group_name FROM sessions WHERE conversation_id = ?;",
+                                (cid,)
+                            ).fetchone()
+                            t = row["title"] if row else ""
+                            g = row["group_name"] if row else ""
+                            _, _, content = extract_transcript_full_content(cid)
+                            update_fts_entry(conn_h, cid, t, g, abs_ws, content)
+                conn_h.close()
+            except Exception:
+                pass
+
+    # 3. Update master_history.tsv across all data dirs
+    for d in all_dirs:
+        tsv_path = os.path.join(d, "master_history.tsv")
+        if os.path.exists(tsv_path):
+            try:
+                updated_lines = []
+                with open(tsv_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line_str = line.strip()
+                        if not line_str:
+                            continue
+                        parts = line_str.split("\t")
+                        # master_history.tsv stores: cid, mtime, msgs, group, title
+                        updated_lines.append(line)
+                tmp_tsv = tsv_path + ".tmp"
+                with open(tmp_tsv, "w", encoding="utf-8") as f:
+                    f.writelines(updated_lines)
+                os.replace(tmp_tsv, tsv_path)
+            except Exception:
+                pass
+
+    # 4. Update workspaces.json across all data dirs
+    for cid in cid_list:
+        save_workspace(cid, abs_ws)
+
+    return len(cid_list), abs_ws
+
 def configure_alias_interactive():
     clear_screen()
     cfg = {}
@@ -1962,7 +2089,7 @@ def all_chats_view():
         print("                All Chats                 ")
         print("==========================================")
         render_terminal_table(chats, limit=None)
-        print("\nCmds: <num> resume | e <num> edit | x <num|all> export | d <n1,n2..> del | n new | Esc/b back")
+        print("\nCmds: <num> resume | m <num> move | e <num> edit | x <num|all> export | d <n1,n2..> del | n new | Esc/b back")
         cmd = get_prompt_input("Select > ")
 
         if cmd.lower() in ("b", "back", "q", "quit", "esc"):
@@ -1970,6 +2097,22 @@ def all_chats_view():
         elif cmd.lower() in ("n", "new"):
             start_new_chat()
             break
+        elif cmd.lower().startswith("m ") or cmd.lower() == "m":
+            part = cmd[2:].strip() if len(cmd) > 1 else ""
+            if not part:
+                part = get_prompt_input("Move chat number: ").strip()
+            if part.isdigit() and 1 <= int(part) <= len(chats):
+                target = chats[int(part) - 1]
+                curr_ws = target.get("workspace") or resolve_workspace(target["id"]) or os.getcwd()
+                chosen_ws = select_new_chat_workspace(
+                    title=f"Move Chat #{part}: '{target['title'][:20]}'",
+                    prompt="Move to [1]: ",
+                    current_ws=curr_ws
+                )
+                if chosen_ws:
+                    count, final_ws = transplant_conversations([target["id"]], chosen_ws)
+                    print(f"\n✔ Successfully moved chat #{part} to:\n  {final_ws}")
+                    time.sleep(1.0)
         elif cmd.lower().startswith("e "):
             part = cmd[2:].strip()
             if part.isdigit() and 1 <= int(part) <= len(chats):
@@ -2019,14 +2162,36 @@ def search_chats_cli(query):
     print(f"Found {len(matched)} chat(s) matching '{query}':")
     render_terminal_table(matched)
 
-def list_groups_cli():
+def list_groups_cli(interactive=False):
     chats = get_all_chats()
     groups = {}
     for c in chats:
         groups.setdefault(c["group"], []).append(c)
+    sorted_groups = sorted(groups.items())
     print("Groups & Notebooks:")
-    for idx, (g, clist) in enumerate(sorted(groups.items()), 1):
+    for idx, (g, clist) in enumerate(sorted_groups, 1):
         print(f"  [{idx}] {g} ({len(clist)} chat{'s' if len(clist) != 1 else ''})")
+
+    if not interactive:
+        return
+
+    print("\nCmds: m <num> move entire group | Enter/Esc back")
+    cmd = get_prompt_input("Select > ").strip()
+    if cmd.lower().startswith("m ") or cmd.lower() == "m":
+        part = cmd[2:].strip() if len(cmd) > 1 else ""
+        if not part:
+            part = get_prompt_input("Group number to move: ").strip()
+        if part.isdigit() and 1 <= int(part) <= len(sorted_groups):
+            gname, clist = sorted_groups[int(part) - 1]
+            chosen_ws = select_new_chat_workspace(
+                title=f"Move Group: '{gname}' ({len(clist)} chats)",
+                prompt="Move all to folder [1]: "
+            )
+            if chosen_ws:
+                g_cids = [c["id"] for c in clist]
+                count, final_ws = transplant_conversations(g_cids, chosen_ws)
+                print(f"\n✔ Successfully moved {count} chat(s) in group '{gname}' to:\n  {final_ws}")
+                time.sleep(1.2)
 
 def main():
     if len(sys.argv) > 1:
@@ -2067,12 +2232,69 @@ Options:
   -d, --delete, --del, rm <ids...> Delete session(s) non-interactively (e.g. -d 1,2 or rm 1-3)
   --days <N>                Filter chats from the last N days (e.g. --days 7)
   -H, --hours <N>           Filter chats from the last N hours (e.g. --hours 2)
+  mv <id|num> [target_dir]  Move/transplant chat to target directory (default: CWD)
+  mv -g, --group <name> [target_dir] Move all chats in a group to target directory
   --groups-cli              List all notebook groups
   --set-title <id> "<title>" Set clean abstracted session title
   --update                  Check and pull latest updates
   --uninstall               Uninstall sessionList and its shortcuts
 """)
             return
+        elif arg in ("mv", "move"):
+            # ach mv <id|num> [target_dir]
+            # ach mv -g, --group <group_name> [target_dir]
+            raw_args = sys.argv[2:]
+            if not raw_args:
+                print("Usage:")
+                print("  ach mv <id|num> [target_dir]")
+                print("  ach mv -g, --group <group_name> [target_dir]")
+                return
+
+            chats = get_all_chats()
+            if raw_args[0] in ("-g", "--group"):
+                if len(raw_args) < 2:
+                    print("Error: Missing group name. Example: ach mv -g 'Projects' /path/to/target")
+                    return
+                gname = raw_args[1]
+                target_dir = raw_args[2] if len(raw_args) > 2 else os.getcwd()
+                group_chats = [c for c in chats if c["group"].lower() == gname.lower()]
+                if not group_chats:
+                    print(f"Error: No chats found in group '{gname}'.")
+                    return
+                cids = [c["id"] for c in group_chats]
+                try:
+                    count, final_ws = transplant_conversations(cids, target_dir)
+                    print(f"✔ Successfully moved {count} chat(s) in group '{gname}' to:\n  {final_ws}")
+                except Exception as e:
+                    print(f"Error moving group '{gname}': {e}")
+                return
+            else:
+                target_id = raw_args[0]
+                target_dir = raw_args[1] if len(raw_args) > 1 else os.getcwd()
+                cid_to_move = None
+                chat_title = ""
+                if target_id.isdigit():
+                    idx = int(target_id)
+                    if 1 <= idx <= len(chats):
+                        cid_to_move = chats[idx - 1]["id"]
+                        chat_title = chats[idx - 1]["title"]
+                    else:
+                        print(f"Error: Chat index {idx} out of range (1-{len(chats)}).")
+                        return
+                else:
+                    matched = [c for c in chats if c["id"].startswith(target_id)]
+                    if matched:
+                        cid_to_move = matched[0]["id"]
+                        chat_title = matched[0]["title"]
+                    else:
+                        print(f"Error: No chat found matching identifier '{target_id}'.")
+                        return
+                try:
+                    count, final_ws = transplant_conversations([cid_to_move], target_dir)
+                    print(f"✔ Successfully moved '{chat_title}' to:\n  {final_ws}")
+                except Exception as e:
+                    print(f"Error moving chat '{target_id}': {e}")
+                return
         elif arg in ("--export", "-x"):
             target_arg = sys.argv[2] if len(sys.argv) > 2 else "all"
             chats = get_all_chats()
@@ -2217,8 +2439,7 @@ Options:
                         resume_chat(matched[int(sub) - 1]["id"])
                         break
         elif choice == "3":
-            list_groups_cli()
-            get_prompt_input("\nPress Enter or Esc to continue...")
+            list_groups_cli(interactive=True)
         elif choice in ("4", "s", "set", "settings"):
             settings_view()
 
