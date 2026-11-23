@@ -439,9 +439,11 @@
           <span class="t-dot"></span>
           <span class="t-dot"></span>
         </div>
-        <span class="terminal-title">antig-m (interactive resume &amp; fts5 recall)</span>
+        <span class="terminal-title">ach (interactive session manager &amp; fts5 search)</span>
       </div>
-      <div class="terminal-content"><span class="c-dim">$</span> antig-m --search "fts5 index"
+      <div class="terminal-content"><span class="c-dim">$</span> ach -s "fts5 index"
+<span class="c-bold">Ach! v2.2.1</span>
+<span class="c-dim">──────────────────────────────────────────────</span>
 <span class="c-muted">Matched 3 sessions in 3.4ms across 42 conversations</span>
 
 <span class="c-accent">[1]</span>  <span class="c-yellow">Today 18:24</span>   <span class="c-bold">Investigate FTS5 full-text recall benchmark</span>  <span class="c-dim">(active)</span>
@@ -479,7 +481,7 @@
         </div>
         <div class="card">
           <h3>Interactive &amp; Headless</h3>
-          <p>Use <code>antig-h</code> for instant scripted output or <code>antig-m</code> for an interactive keyboard-driven manager.</p>
+          <p>Use <code>ach -l</code> (or <code>antig-h</code>) for instant scripted output, or <code>ach</code> (<code>antig-m</code>) for an interactive keyboard-driven manager.</p>
         </div>
         <div class="card">
           <h3>Batch Operations</h3>
@@ -509,18 +511,17 @@
         <div class="tab-bar">
           <div class="tab-btn active">Terminal Commands</div>
         </div>
-        <div class="tab-content"><span class="c-dim"># Quick table dump</span>
-antig-h              <span class="c-dim"># View 15 most recent sessions</span>
-antig-h --all        <span class="c-dim"># Show entire history archive</span>
-antig-h --days 7     <span class="c-dim"># Filter sessions from past 7 days</span>
-antig-h -s "query"   <span class="c-dim"># FTS5 search across titles and transcripts</span>
+        <div class="tab-content"><span class="c-dim"># Interactive TUI &amp; quick table dump</span>
+ach                  <span class="c-dim"># Launch interactive selector, search &amp; manager (alias: antig-m)</span>
+ach -l               <span class="c-dim"># View 15 most recent sessions (alias: antig-h)</span>
+ach --all            <span class="c-dim"># Show entire history archive</span>
+ach --days 7         <span class="c-dim"># Filter sessions from past 7 days</span>
+ach -s "query"       <span class="c-dim"># FTS5 search across titles and transcripts</span>
 
-<span class="c-dim"># Batch actions</span>
-antig-h rm 1-3       <span class="c-dim"># Batch delete sessions 1 through 3</span>
-antig-h -x all       <span class="c-dim"># Export all sessions to Markdown notes</span>
-
-<span class="c-dim"># Interactive TUI dashboard</span>
-antig-m              <span class="c-dim"># Launch interactive selector, search &amp; manager</span></div>
+<span class="c-dim"># Batch actions &amp; workspace transplant</span>
+ach rm 1-3           <span class="c-dim"># Batch delete sessions 1 through 3</span>
+ach -x all           <span class="c-dim"># Export all sessions to Markdown notes</span>
+ach mv 2 ~/dir       <span class="c-dim"># Move session 2 workspace to ~/dir</span></div>
       </div>
     </div>
 
