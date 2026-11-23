@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-sessionList (v2.2 SQLite WAL + FTS5 & Multi-Workspace Architecture)
+Ach! (v2.2.1 SQLite WAL + FTS5 & Multi-Workspace Architecture)
 High-efficiency, zero-overhead session history manager for Google Antigravity CLI.
 Uses SQLite WAL mode with FTS5 full-text indexing, multi-workspace directory discovery,
-hardened locking, and backward-compatible TSV master mirroring.
+and hardened locking.
 Guaranteed fit for 80-column terminal displays.
 """
 
@@ -24,8 +24,9 @@ from datetime import datetime, timedelta
 
 def get_data_dir():
     # 1. Environment variable override
-    if os.environ.get("SESSIONLIST_DATA_DIR") and os.path.isdir(os.environ.get("SESSIONLIST_DATA_DIR")):
-        return os.environ.get("SESSIONLIST_DATA_DIR")
+    for env_var in ("ACH_DATA_DIR", "SESSIONLIST_DATA_DIR"):
+        if os.environ.get(env_var) and os.path.isdir(os.environ.get(env_var)):
+            return os.environ.get(env_var)
 
     # 2. Look upwards from CWD for active workspace root containing .agents or .gemini
     try:
@@ -33,7 +34,8 @@ def get_data_dir():
         while curr and curr != os.path.dirname(curr):
             agents_dir = os.path.join(curr, ".agents")
             if os.path.isdir(agents_dir):
-                target = os.path.join(agents_dir, "sessionlist_data")
+                legacy_target = os.path.join(agents_dir, "sessionlist_data")
+                target = legacy_target if os.path.isdir(legacy_target) else os.path.join(agents_dir, "ach_data")
                 try:
                     os.makedirs(target, exist_ok=True)
                     test = os.path.join(target, ".write_test")
@@ -50,7 +52,8 @@ def get_data_dir():
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         cand_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-        cand_agents = os.path.join(cand_root, ".agents", "sessionlist_data")
+        legacy_agents = os.path.join(cand_root, ".agents", "sessionlist_data")
+        cand_agents = legacy_agents if os.path.isdir(legacy_agents) else os.path.join(cand_root, ".agents", "ach_data")
         if os.path.isdir(os.path.dirname(cand_agents)):
             try:
                 os.makedirs(cand_agents, exist_ok=True)
@@ -66,10 +69,10 @@ def get_data_dir():
     # 4. Standard persistent fallbacks across Linux, macOS, WSL
     home = os.path.expanduser("~")
     fallbacks = [
-        os.path.join(home, ".gemini", "antigravity-cli", "plugin_data", "sessionlist"),
-        os.path.join(home, ".config", "sessionlist"),
-        os.path.join(home, ".cache", "sessionlist"),
-        "/tmp/sessionlist"
+        os.path.join(home, ".gemini", "antigravity-cli", "plugin_data", "ach"),
+        os.path.join(home, ".config", "ach"),
+        os.path.join(home, ".cache", "ach"),
+        "/tmp/ach"
     ]
     for p in fallbacks:
         try:
@@ -83,7 +86,6 @@ def get_data_dir():
     return "/tmp"
 
 DATA_DIR = get_data_dir()
-MASTER_TSV = os.path.join(DATA_DIR, "master_history.tsv")
 HISTORY_DB = os.path.join(DATA_DIR, "history.db")
 LOCK_FILE = os.path.join(DATA_DIR, "history.lock")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
@@ -271,7 +273,7 @@ def select_new_chat_workspace(title="Start New Antigravity Chat", prompt="Select
     Cleanly numbers all options sequentially:
       [1] Current Directory (/home/ashwath)
       [2] Antigravity Root (/mnt/a/anti-g)
-      [3] /mnt/a/anti-g/projects/sessionList
+      [3] /path/to/project/ach-cli
       ...
       [c] Custom Folder Path
       [q] Cancel
@@ -529,84 +531,6 @@ def update_fts_entry(conn, cid, title, group_name, workspace, content=""):
         )
     except Exception:
         pass
-
-def migrate_tsv_to_sqlite(db_path=None, tsv_path=None):
-    """
-    On first run or when TSV records exist that are missing from SQLite,
-    reads existing master_history.tsv records into history.db so no history is lost.
-    """
-    db_file = db_path if db_path else HISTORY_DB
-    tsv_file = tsv_path if tsv_path else MASTER_TSV
-    if not os.path.exists(tsv_file):
-        return 0
-
-    init_db(db_path=db_file)
-    conn = get_db_connection(db_file)
-    migrated_count = 0
-    try:
-        workspaces = load_workspaces()
-        with conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            cur = conn.cursor()
-            existing_cids = {row[0] for row in cur.execute("SELECT conversation_id FROM sessions;").fetchall()}
-
-            tsv_records = []
-            with open(tsv_file, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) >= 5:
-                        cid, mtime_str, msgs_str, group, title = parts[0], parts[1], parts[2], parts[3], parts[4]
-                    elif len(parts) == 4:
-                        cid, mtime_str, msgs_str, group = parts[0], parts[1], parts[2], parts[3]
-                        title = "Untitled Chat"
-                    elif len(parts) >= 2:
-                        cid, mtime_str = parts[0], parts[1]
-                        msgs_str, group, title = "1", "General", "Untitled Chat"
-                    else:
-                        continue
-
-                    try:
-                        mtime = float(mtime_str)
-                    except ValueError:
-                        mtime = 0.0
-                    try:
-                        msgs = int(msgs_str)
-                    except ValueError:
-                        msgs = 1
-
-                    tsv_records.append((cid, mtime, msgs, group, title))
-
-            now = datetime.now()
-            # Pre-extract transcripts before opening the exclusive write transaction
-            to_insert = []
-            for cid, mtime, msgs, group, title in tsv_records:
-                if cid not in existing_cids:
-                    dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
-                    iso_time = dt.isoformat()
-                    rel_label = get_relative_date_label(dt, now)
-                    ws = workspaces.get(cid, "")
-                    _, _, content = extract_transcript_full_content(cid)
-                    to_insert.append((cid, iso_time, rel_label, title, group, ws, msgs, mtime, content))
-
-            for cid, iso_time, rel_label, title, group, ws, msgs, mtime, content in to_insert:
-                cur.execute("""
-                    INSERT OR REPLACE INTO sessions 
-                    (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
-
-                update_fts_entry(conn, cid, title, group, ws, content)
-                existing_cids.add(cid)
-                migrated_count += 1
-    except Exception as e:
-        print(f"Error during TSV migration: {e}")
-    finally:
-        conn.close()
-
-    return migrated_count
 
 def sync_antigravity_summaries_db(conn=None):
     """
@@ -938,111 +862,6 @@ def search_sessions_fts(query, db_path=None):
 
     return records
 
-# Backward compatibility TSV helpers
-def read_master_tsv():
-    """Compatibility helper reading from SQLite history.db (or TSV fallback)."""
-    records = read_sessions()
-    if records:
-        return records
-    if not os.path.exists(MASTER_TSV):
-        return []
-    records = []
-    try:
-        with open(MASTER_TSV, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split("\t")
-                if len(parts) >= 5:
-                    cid, mtime_str, msgs_str, group, title = parts[0], parts[1], parts[2], parts[3], parts[4]
-                elif len(parts) == 4:
-                    cid, mtime_str, msgs_str, group = parts[0], parts[1], parts[2], parts[3]
-                    title = "Untitled Chat"
-                elif len(parts) >= 2:
-                    cid, mtime_str = parts[0], parts[1]
-                    msgs_str, group, title = "1", "General", "Untitled Chat"
-                else:
-                    continue
-
-                try:
-                    mtime = float(mtime_str)
-                except ValueError:
-                    mtime = 0.0
-                try:
-                    msgs = int(msgs_str)
-                except ValueError:
-                    msgs = 1
-
-                records.append({
-                    "id": cid,
-                    "mtime": mtime,
-                    "msgs": msgs,
-                    "group": group,
-                    "title": title
-                })
-    except Exception:
-        pass
-    return records
-
-def write_master_tsv(records):
-    """Compatibility helper persisting to both history.db and mirror master_history.tsv."""
-    init_db()
-    with FileLock(LOCK_FILE):
-        conn = get_db_connection()
-        try:
-            now = datetime.now()
-            workspaces = load_workspaces()
-            with conn:
-                conn.execute("BEGIN IMMEDIATE;")
-                cur = conn.cursor()
-                for r in records:
-                    cid = str(r["id"]).strip()
-                    mtime = float(r["mtime"])
-                    msgs = int(r["msgs"])
-                    group = str(r.get("group", "General")).strip() or "General"
-                    title = str(r.get("title", "Untitled Chat")).strip() or "Untitled Chat"
-                    ws = str(r.get("workspace", workspaces.get(cid, "")))
-                    dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
-                    iso_time = dt.isoformat()
-                    rel_label = get_relative_date_label(dt, now)
-
-                    cur.execute("""
-                        INSERT OR REPLACE INTO sessions 
-                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                    """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
-                    update_fts_entry(conn, cid, title, group, ws, "")
-        except Exception as e:
-            print(f"Error persisting to SQLite: {e}")
-        finally:
-            conn.close()
-
-        # Also keep master_history.tsv updated for plain-text mirrors/backwards compat
-        tmp_path = MASTER_TSV + ".tmp"
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                for r in records:
-                    cid = str(r["id"]).replace("\t", " ").replace("\n", " ").strip()
-                    mtime = r["mtime"]
-                    msgs = r["msgs"]
-                    group = str(r.get("group", "General")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "General"
-                    title = str(r.get("title", "Untitled Chat")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "Untitled Chat"
-                    f.write(f"{cid}\t{mtime}\t{msgs}\t{group}\t{title}\n")
-            os.replace(tmp_path, MASTER_TSV)
-            mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
-            if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(MASTER_TSV):
-                try:
-                    shutil.copy2(MASTER_TSV, os.path.join(mirror_dir, "master_history.tsv"))
-                except Exception:
-                    pass
-        except Exception:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-
 def parse_transcript_data(fpath):
     first_prompt = ""
     user_turns = 0
@@ -1067,16 +886,8 @@ def parse_transcript_data(fpath):
 
     return first_prompt, user_turns
 
-def sync_active_session_to_tsv():
-    """Syncs active session transcripts and Antigravity DB to history.db."""
-    init_db()
-    migrate_tsv_to_sqlite()
-    sync_antigravity_summaries_db()
-    sync_active_sessions_to_db()
-
 def get_all_chats():
     init_db()
-    migrate_tsv_to_sqlite()
     sync_antigravity_summaries_db()
     sync_active_sessions_to_db()
 
@@ -1148,14 +959,6 @@ def set_chat_title(cid, new_title):
         finally:
             conn.close()
 
-        # Sync to TSV mirror
-        records = read_master_tsv()
-        for r in records:
-            if r["id"] == cid:
-                r["title"] = sanitized_title
-                break
-        write_master_tsv(records)
-
     print(f"✔ Abstracted title saved: '{sanitized_title}'")
 
 def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
@@ -1195,24 +998,21 @@ def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
         finally:
             conn.close()
 
-        records = read_master_tsv()
-        for r in records:
-            if r["id"] in matching_ids:
-                r["group"] = sanitized_group
-        write_master_tsv(records)
-
     print(f"✔ Successfully assigned {len(matching_ids)} session(s) to group '{sanitized_group}'.")
 
 def get_all_data_dirs():
-    """Returns all known sessionlist data directories (active and mirrors)."""
+    """Returns all known ach data directories (active and mirrors)."""
     home = os.path.expanduser("~")
     dirs = [
         DATA_DIR,
+        os.path.join(home, ".gemini", "antigravity-cli", "plugin_data", "ach"),
         os.path.join(home, ".gemini", "antigravity-cli", "plugin_data", "sessionlist"),
+        "/mnt/a/anti-g/.agents/ach_data",
         "/mnt/a/anti-g/.agents/sessionlist_data"
     ]
     root = detect_antigravity_root()
     if root:
+        dirs.append(os.path.join(root, ".agents", "ach_data"))
         dirs.append(os.path.join(root, ".agents", "sessionlist_data"))
     unique_dirs = []
     seen = set()
@@ -1234,8 +1034,7 @@ def purge_chats_from_all_storage(cids):
        - conversation_parents
     4. Annotations: ~/.gemini/antigravity-cli/annotations/<cid>.pbtxt
     5. SQLite history.db and sessions_fts in active and all mirror paths
-    6. TSV and Workspaces across active and all mirror paths:
-       - Purges cids from master_history.tsv in all data dirs
+    6. Workspaces across active and all mirror paths:
        - Purges cids from workspaces.json in all data dirs
     """
     if not cids:
@@ -1318,27 +1117,6 @@ def purge_chats_from_all_storage(cids):
                         if "sessions_fts" in t_names:
                             cur_h.execute("DELETE FROM sessions_fts WHERE conversation_id = ?;", (cid,))
                 conn_h.close()
-            except Exception:
-                pass
-
-        # Clean master_history.tsv
-        tsv_path = os.path.join(d, "master_history.tsv")
-        if os.path.exists(tsv_path):
-            try:
-                lines_kept = []
-                with open(tsv_path, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        line_str = line.strip()
-                        if not line_str:
-                            continue
-                        parts = line_str.split("\t")
-                        if parts and parts[0] in cid_set:
-                            continue
-                        lines_kept.append(line)
-                tmp_tsv = tsv_path + ".tmp"
-                with open(tmp_tsv, "w", encoding="utf-8") as f:
-                    f.writelines(lines_kept)
-                os.replace(tmp_tsv, tsv_path)
             except Exception:
                 pass
 
@@ -1516,15 +1294,6 @@ def move_or_rename_chat(chat):
             finally:
                 conn.close()
 
-            records = read_master_tsv()
-            for r in records:
-                if r["id"] == cid:
-                    if title_val:
-                        r["title"] = title_val
-                    if group_val:
-                        r["group"] = group_val
-                    break
-            write_master_tsv(records)
         print("\n✔ Updated. Refreshing...")
         time.sleep(0.5)
 
@@ -1538,8 +1307,7 @@ def transplant_conversations(cids, new_workspace, target_db_path=None):
     3. Updates history.db across active and mirror paths:
        - UPDATE sessions SET workspace = ? WHERE conversation_id = ?
        - UPDATE sessions_fts
-    4. Updates master_history.tsv
-    5. Updates workspaces.json across all data paths (save_workspace).
+    4. Updates workspaces.json across all data paths (save_workspace).
     Returns (success_count, absolute_workspace_path).
     """
     if not cids:
@@ -1625,28 +1393,7 @@ def transplant_conversations(cids, new_workspace, target_db_path=None):
             except Exception:
                 pass
 
-    # 3. Update master_history.tsv across all data dirs
-    for d in all_dirs:
-        tsv_path = os.path.join(d, "master_history.tsv")
-        if os.path.exists(tsv_path):
-            try:
-                updated_lines = []
-                with open(tsv_path, "r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        line_str = line.strip()
-                        if not line_str:
-                            continue
-                        parts = line_str.split("\t")
-                        # master_history.tsv stores: cid, mtime, msgs, group, title
-                        updated_lines.append(line)
-                tmp_tsv = tsv_path + ".tmp"
-                with open(tmp_tsv, "w", encoding="utf-8") as f:
-                    f.writelines(updated_lines)
-                os.replace(tmp_tsv, tsv_path)
-            except Exception:
-                pass
-
-    # 4. Update workspaces.json across all data dirs
+    # 3. Update workspaces.json across all data dirs
     for cid in cid_list:
         save_workspace(cid, abs_ws)
 
@@ -1757,14 +1504,12 @@ def show_storage_info():
     clear_screen()
     records = get_all_chats()
     db_size = os.path.getsize(HISTORY_DB) if os.path.exists(HISTORY_DB) else 0
-    tsv_size = os.path.getsize(MASTER_TSV) if os.path.exists(MASTER_TSV) else 0
 
     print("Ach! · storage & diagnostics")
     print("─" * 46)
     print(f"  Data Directory:      {DATA_DIR}")
     print(f"  SQLite Database:     {HISTORY_DB}")
     print(f"  DB Size on Disk:     {db_size} bytes ({db_size/1024:.2f} KB)")
-    print(f"  Master History TSV:  {MASTER_TSV} ({tsv_size/1024:.2f} KB)")
     print(f"  Total Chats Saved:   {len(records)} sessions")
     print(f"  Antigravity Brain:   {BRAIN_DIR}")
     print("─" * 46)
@@ -1772,22 +1517,17 @@ def show_storage_info():
 
 def backup_history_log():
     clear_screen()
-    if not os.path.exists(HISTORY_DB) and not os.path.exists(MASTER_TSV):
-        print("No history database or TSV found to backup.")
+    if not os.path.exists(HISTORY_DB):
+        print("No history database found to backup.")
         time.sleep(1)
         return
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     bak_db_name = f"history_backup_{ts}.db"
     bak_db_path = os.path.join(DATA_DIR, bak_db_name)
-    bak_tsv_name = f"master_history_backup_{ts}.tsv"
-    bak_tsv_path = os.path.join(DATA_DIR, bak_tsv_name)
 
     try:
-        if os.path.exists(HISTORY_DB):
-            shutil.copy2(HISTORY_DB, bak_db_path)
-        if os.path.exists(MASTER_TSV):
-            shutil.copy2(MASTER_TSV, bak_tsv_path)
+        shutil.copy2(HISTORY_DB, bak_db_path)
 
         print("Ach! · history backup created")
         print("─" * 46)
@@ -1800,13 +1540,11 @@ def backup_history_log():
 
 def restore_history_log():
     clear_screen()
-    print("Ach! · restore history log (sqlite)")
+    print("Ach! · restore history database (sqlite)")
     print("─" * 46)
     
-    # Look for available backups in DATA_DIR (both DB and TSV)
-    db_baks = sorted(glob.glob(os.path.join(DATA_DIR, "history_backup_*.db")), reverse=True)
-    tsv_baks = sorted(glob.glob(os.path.join(DATA_DIR, "master_history_backup_*.tsv")), reverse=True)
-    baks = db_baks + tsv_baks
+    # Look for available backups in DATA_DIR
+    baks = sorted(glob.glob(os.path.join(DATA_DIR, "history_backup_*.db")), reverse=True)
     if not baks:
         print("  No previous backups found in:")
         print(f"  {DATA_DIR}")
@@ -1827,16 +1565,13 @@ def restore_history_log():
         selected_bak = baks[int(choice) - 1]
         try:
             with FileLock(LOCK_FILE):
-                if selected_bak.endswith(".db"):
-                    shutil.copy2(selected_bak, HISTORY_DB)
-                    # Mirror to plugin_data if applicable
-                    mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
+                shutil.copy2(selected_bak, HISTORY_DB)
+                # Mirror to plugin_data if applicable
+                for mirror_name in ("ach", "sessionlist"):
+                    mirror_dir = os.path.expanduser(f"~/.gemini/antigravity-cli/plugin_data/{mirror_name}")
                     if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(HISTORY_DB):
                         shutil.copy2(HISTORY_DB, os.path.join(mirror_dir, "history.db"))
-                elif selected_bak.endswith(".tsv"):
-                    shutil.copy2(selected_bak, MASTER_TSV)
-                    migrate_tsv_to_sqlite(tsv_path=selected_bak)
-            print(f"\n✔ Successfully restored master history from:")
+            print(f"\n✔ Successfully restored history database from:")
             print(f"  {os.path.basename(selected_bak)}")
         except Exception as e:
             print(f"\nError restoring backup: {e}")
@@ -1951,13 +1686,13 @@ def export_chat_to_markdown():
     print(f"  {export_dir}")
     get_prompt_input("\nPress Enter or ESC to return...")
 
-def uninstall_sessionlist():
+def uninstall_ach():
     clear_screen()
-    print("Ach! · uninstall sessionlist")
+    print("Ach! · uninstall")
     print("─" * 46)
     print("This will remove Ach! binaries and")
     print("shortcuts from ~/.local/bin/ and")
-    print("~/.local/share/sessionlist/.")
+    print("~/.local/share/ach/.")
     print("\nYour conversation history will remain safe.")
     print("─" * 46)
     confirm = get_prompt_input("Are you sure you want to uninstall? (y/N): ").strip().lower()
@@ -1968,7 +1703,10 @@ def uninstall_sessionlist():
         return
 
     bin_dir = os.path.expanduser("~/.local/bin")
-    install_base = os.path.expanduser("~/.local/share/sessionlist")
+    install_bases = [
+        os.path.expanduser("~/.local/share/ach"),
+        os.path.expanduser("~/.local/share/sessionlist"),
+    ]
 
     # Find and delete aliases in bin_dir
     removed_files = []
@@ -1995,12 +1733,13 @@ def uninstall_sessionlist():
                 except Exception:
                     pass
 
-    # Remove install base directory if exists
-    if os.path.exists(install_base):
-        try:
-            shutil.rmtree(install_base)
-        except Exception:
-            pass
+    # Remove install base directories if they exist
+    for install_base in install_bases:
+        if os.path.exists(install_base):
+            try:
+                shutil.rmtree(install_base)
+            except Exception:
+                pass
 
     print("\n✔ Successfully uninstalled Ach!!")
     if removed_files:
@@ -2016,8 +1755,8 @@ def settings_view():
         print("  [1] CLI Alias & Shortcuts (Rename)")
         print("  [2] Default Time Window Filter")
         print("  [3] Export Chats to Markdown (.md)")
-        print("  [4] Backup Master History (TSV)")
-        print("  [5] Restore Master History from Backup")
+        print("  [4] Backup History Database (SQLite)")
+        print("  [5] Restore History Database from Backup")
         print("  [6] Storage & Diagnostics Info")
         print("  [7] Uninstall Ach!")
         print("  [b] Back / ESC")
@@ -2039,7 +1778,7 @@ def settings_view():
         elif choice == "6":
             show_storage_info()
         elif choice == "7":
-            uninstall_sessionlist()
+            uninstall_ach()
 
 def _exec_agy(extra_args):
     """Clean process hand-off replacing current Python process when possible."""
@@ -2237,7 +1976,9 @@ def main():
             print("Ach! v2.2.1 — Archive Chat History")
             return
         elif arg in ("--update", "update"):
-            install_base = os.path.expanduser("~/.local/share/sessionlist")
+            install_base = os.path.expanduser("~/.local/share/ach")
+            if not os.path.exists(os.path.join(install_base, ".git")):
+                install_base = os.path.expanduser("~/.local/share/sessionlist")
             bin_dir = os.path.expanduser("~/.local/bin")
             if os.path.exists(os.path.join(install_base, ".git")):
                 print("Checking for updates...")
@@ -2262,7 +2003,7 @@ def main():
                     # 2. Re-sync launcher binary wrappers in ~/.local/bin/
                     cfg_alias = detect_cli_command()
                     if cfg_alias and os.path.isdir(bin_dir):
-                        script_target = os.path.join(install_base, "sessionlist.py")
+                        script_target = os.path.join(install_base, "ach.py")
                         h_path = os.path.join(bin_dir, f"{cfg_alias}-h")
                         m_path = os.path.join(bin_dir, f"{cfg_alias}-m")
                         base_path = os.path.join(bin_dir, cfg_alias)
@@ -2294,7 +2035,7 @@ def main():
                 print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh")
             return
         elif arg == "--uninstall":
-            uninstall_sessionlist()
+            uninstall_ach()
             return
         elif arg in ("--help", "-h"):
             print("""NAME

@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# sessionList 1-Line Remote Installer
+# Ach! 1-Line Remote Installer
 set -e
 
 PRIMARY_REPO="https://github.com/AshraArc/ach-cli.git"
 FALLBACK_REPO="https://github.com/AshraArc/-antigravity-chat-manager.git"
-INSTALL_BASE="$HOME/.local/share/sessionlist"
+INSTALL_BASE="$HOME/.local/share/ach"
 BIN_DIR="$HOME/.local/bin"
 
 mkdir -p "$BIN_DIR"
 
 if [ -d "$INSTALL_BASE/.git" ]; then
-    echo "Updating existing sessionList..."
+    echo "Updating existing Ach!..."
     git -C "$INSTALL_BASE" pull --quiet || {
         echo "Pull failed, attempting remote update..."
         git -C "$INSTALL_BASE" remote set-url origin "$PRIMARY_REPO" 2>/dev/null || true
         git -C "$INSTALL_BASE" pull --quiet 2>/dev/null || true
     }
 else
-    echo "Downloading sessionList..."
+    echo "Downloading Ach!..."
     rm -rf "$INSTALL_BASE"
     if ! git clone --depth 1 --quiet "$PRIMARY_REPO" "$INSTALL_BASE" 2>/dev/null; then
         echo "Primary repo failed, falling back to backup repository URL..."
@@ -39,7 +39,7 @@ else
     CMD_PREFIX="$DEFAULT_PREFIX"
 fi
 
-SCRIPT_PATH="$INSTALL_BASE/sessionlist.py"
+SCRIPT_PATH="$INSTALL_BASE/ach.py"
 
 # 1. Quick list binary: <cmd>-h
 cat << EOF > "$BIN_DIR/${CMD_PREFIX}-h"
@@ -76,7 +76,7 @@ if [ -d "$INSTALL_BASE" ]; then
 fi
 
 # 6. Auto-register skills in Antigravity skill directories if they exist
-SKILL_SRC="$INSTALL_BASE/skills/sessionlist"
+SKILL_SRC="$INSTALL_BASE/skills/ach"
 if [ -d "$SKILL_SRC" ]; then
     TARGET_SKILL_DIRS=(
         "$HOME/.gemini/antigravity-cli/skills"
@@ -84,7 +84,8 @@ if [ -d "$SKILL_SRC" ]; then
     )
     for target_dir in "${TARGET_SKILL_DIRS[@]}"; do
         if [ -d "$target_dir" ]; then
-            dest="$target_dir/sessionlist"
+            rm -rf "$target_dir/sessionlist"
+            dest="$target_dir/ach"
             rm -rf "$dest"
             ln -sf "$SKILL_SRC" "$dest" 2>/dev/null || cp -r "$SKILL_SRC" "$dest"
             echo "✔ Registered skill in $dest"

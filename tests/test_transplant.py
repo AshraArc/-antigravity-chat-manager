@@ -18,7 +18,7 @@ from datetime import datetime
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import sessionlist
+import ach
 
 class TestSessionTransplant(unittest.TestCase):
     def setUp(self):
@@ -34,32 +34,29 @@ class TestSessionTransplant(unittest.TestCase):
         os.makedirs(self.target_ws1, exist_ok=True)
         os.makedirs(self.target_ws2, exist_ok=True)
 
-        self.orig_data_dir = sessionlist.DATA_DIR
-        self.orig_brain_dir = sessionlist.BRAIN_DIR
-        self.orig_history_db = sessionlist.HISTORY_DB
-        self.orig_master_tsv = sessionlist.MASTER_TSV
-        self.orig_lock_file = sessionlist.LOCK_FILE
-        self.orig_workspaces_file = sessionlist.WORKSPACES_FILE
+        self.orig_data_dir = ach.DATA_DIR
+        self.orig_brain_dir = ach.BRAIN_DIR
+        self.orig_history_db = ach.HISTORY_DB
+        self.orig_lock_file = ach.LOCK_FILE
+        self.orig_workspaces_file = ach.WORKSPACES_FILE
         self.orig_agy_env = os.environ.get("AGY_SUMMARIES_DB")
 
-        sessionlist.DATA_DIR = self.data_dir
-        sessionlist.BRAIN_DIR = self.brain_dir
-        sessionlist.HISTORY_DB = os.path.join(self.data_dir, "history.db")
-        sessionlist.MASTER_TSV = os.path.join(self.data_dir, "master_history.tsv")
-        sessionlist.LOCK_FILE = os.path.join(self.data_dir, "history.lock")
-        sessionlist.WORKSPACES_FILE = os.path.join(self.data_dir, "workspaces.json")
+        ach.DATA_DIR = self.data_dir
+        ach.BRAIN_DIR = self.brain_dir
+        ach.HISTORY_DB = os.path.join(self.data_dir, "history.db")
+        ach.LOCK_FILE = os.path.join(self.data_dir, "history.lock")
+        ach.WORKSPACES_FILE = os.path.join(self.data_dir, "workspaces.json")
         os.environ["AGY_SUMMARIES_DB"] = self.agy_db_path
 
-        sessionlist.init_db()
+        ach.init_db()
         self._init_mock_agy_db(self.agy_db_path)
 
     def tearDown(self):
-        sessionlist.DATA_DIR = self.orig_data_dir
-        sessionlist.BRAIN_DIR = self.orig_brain_dir
-        sessionlist.HISTORY_DB = self.orig_history_db
-        sessionlist.MASTER_TSV = self.orig_master_tsv
-        sessionlist.LOCK_FILE = self.orig_lock_file
-        sessionlist.WORKSPACES_FILE = self.orig_workspaces_file
+        ach.DATA_DIR = self.orig_data_dir
+        ach.BRAIN_DIR = self.orig_brain_dir
+        ach.HISTORY_DB = self.orig_history_db
+        ach.LOCK_FILE = self.orig_lock_file
+        ach.WORKSPACES_FILE = self.orig_workspaces_file
         if self.orig_agy_env is not None:
             os.environ["AGY_SUMMARIES_DB"] = self.orig_agy_env
         else:
@@ -87,14 +84,14 @@ class TestSessionTransplant(unittest.TestCase):
 
     def _insert_session(self, cid, title, group, ws, mtime=1700000000.0, step_count=5):
         dt = datetime.fromtimestamp(mtime)
-        conn = sessionlist.get_db_connection()
+        conn = ach.get_db_connection()
         with conn:
             conn.execute("""
                 INSERT OR REPLACE INTO sessions 
                 (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """, (cid, dt.isoformat(), "Just now", title, group, ws, step_count, mtime))
-            sessionlist.update_fts_entry(conn, cid, title, group, ws, "")
+            ach.update_fts_entry(conn, cid, title, group, ws, "")
         conn.close()
 
     def test_single_chat_move(self):
@@ -102,7 +99,7 @@ class TestSessionTransplant(unittest.TestCase):
         initial_ws = "/old/workspace/path"
         
         self._insert_session(cid, "Single Move Test Chat", "Development", initial_ws)
-        sessionlist.save_workspace(cid, initial_ws)
+        ach.save_workspace(cid, initial_ws)
 
         # Populate mock AGY db
         conn_agy = sqlite3.connect(self.agy_db_path)
@@ -118,16 +115,16 @@ class TestSessionTransplant(unittest.TestCase):
         conn_agy.close()
 
         # Execute transplant_conversations
-        count, moved_ws = sessionlist.transplant_conversations([cid], self.target_ws1, target_db_path=self.agy_db_path)
+        count, moved_ws = ach.transplant_conversations([cid], self.target_ws1, target_db_path=self.agy_db_path)
         self.assertEqual(count, 1)
         self.assertEqual(moved_ws, os.path.abspath(self.target_ws1))
 
         # 1. Verify workspaces.json
-        ws_map = sessionlist.load_workspaces()
+        ws_map = ach.load_workspaces()
         self.assertEqual(ws_map.get(cid), os.path.abspath(self.target_ws1))
 
         # 2. Verify history.db
-        conn = sessionlist.get_db_connection()
+        conn = ach.get_db_connection()
         row = conn.execute("SELECT workspace FROM sessions WHERE conversation_id = ?;", (cid,)).fetchone()
         conn.close()
         self.assertIsNotNone(row)
@@ -151,7 +148,7 @@ class TestSessionTransplant(unittest.TestCase):
 
         for i, cid in enumerate(cids):
             self._insert_session(cid, f"Chat {cid}", group_name, initial_ws, mtime=1700000000.0 + i)
-            sessionlist.save_workspace(cid, initial_ws)
+            ach.save_workspace(cid, initial_ws)
 
         conn_agy = sqlite3.connect(self.agy_db_path)
         with conn_agy:
@@ -167,17 +164,17 @@ class TestSessionTransplant(unittest.TestCase):
         conn_agy.close()
 
         # Transplant all 3 conversations
-        count, moved_ws = sessionlist.transplant_conversations(cids, self.target_ws2, target_db_path=self.agy_db_path)
+        count, moved_ws = ach.transplant_conversations(cids, self.target_ws2, target_db_path=self.agy_db_path)
         self.assertEqual(count, 3)
         self.assertEqual(moved_ws, os.path.abspath(self.target_ws2))
 
         # Verify all 3 in workspaces.json
-        ws_map = sessionlist.load_workspaces()
+        ws_map = ach.load_workspaces()
         for cid in cids:
             self.assertEqual(ws_map.get(cid), os.path.abspath(self.target_ws2))
 
         # Verify all 3 in history.db
-        conn = sessionlist.get_db_connection()
+        conn = ach.get_db_connection()
         rows = conn.execute("SELECT conversation_id, workspace FROM sessions WHERE group_name = ?;", (group_name,)).fetchall()
         conn.close()
         self.assertEqual(len(rows), 3)
@@ -194,7 +191,7 @@ class TestSessionTransplant(unittest.TestCase):
         conn_agy.close()
 
     def test_cli_parsing(self):
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sessionlist.py"))
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ach.py"))
         env = os.environ.copy()
         env["SESSIONLIST_DATA_DIR"] = self.data_dir
         env["AGY_SUMMARIES_DB"] = self.agy_db_path

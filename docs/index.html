@@ -371,6 +371,7 @@
       line-height: 1.7;
       color: #cbd5e1;
       overflow-x: auto;
+      white-space: pre;
     }
 
     /* Footer */
@@ -417,7 +418,7 @@
     <header class="hero">
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
-        Fast session recall for Google Antigravity
+        Ach! · CLI &amp; In-Chat Plugin for Antigravity
       </div>
       <h1>Archive Chat History — Unified session manager for Antigravity.</h1>
       <p class="lead">Query full conversation histories in milliseconds with SQLite FTS5. One keystroke to resume, batch prune dead sessions, or recall in-chat.</p>
@@ -441,16 +442,16 @@
         </div>
         <span class="terminal-title">ach (interactive session manager &amp; fts5 search)</span>
       </div>
-      <div class="terminal-content"><span class="c-dim">$</span> ach -s "fts5 index"
+      <div class="terminal-content"><span class="c-dim">$</span> ach
 <span class="c-bold">Ach! v2.2.1</span>
 <span class="c-dim">──────────────────────────────────────────────</span>
-<span class="c-muted">Matched 3 sessions in 3.4ms across 42 conversations</span>
+<span class="c-muted">42 conversations indexed · FTS5 ready</span>
 
 <span class="c-accent">[1]</span>  <span class="c-yellow">Today 18:24</span>   <span class="c-bold">Investigate FTS5 full-text recall benchmark</span>  <span class="c-dim">(active)</span>
 <span class="c-accent">[2]</span>  <span class="c-yellow">Today 15:10</span>   Build sqlite wal query pipeline &amp; flock mutex
 <span class="c-accent">[3]</span>  <span class="c-yellow">Yesterday</span>     Add multi-workspace transcript sync
 
-<span class="c-green">Resume:</span> Press <span class="c-accent">[1-3]</span> to resume immediately | <span class="c-muted">[d 1,2]</span> batch delete | <span class="c-muted">[q]</span> quit: _</div>
+<span class="c-green">Resume:</span> Press <span class="c-accent">[1-3]</span> to resume immediately | <span class="c-muted">[/]</span> search | <span class="c-muted">[d 1,2]</span> batch delete | <span class="c-muted">[q]</span> quit: _</div>
     </div>
 
     <!-- Metrics Band -->
@@ -481,7 +482,7 @@
         </div>
         <div class="card">
           <h3>Interactive &amp; Headless</h3>
-          <p>Use <code>ach -l</code> (or <code>antig-h</code>) for instant scripted output, or <code>ach</code> (<code>antig-m</code>) for an interactive keyboard-driven manager.</p>
+          <p>Use <code>ach -l</code> for instant scripted output, or <code>ach</code> for an interactive keyboard-driven manager.</p>
         </div>
         <div class="card">
           <h3>Batch Operations</h3>
@@ -512,8 +513,8 @@
           <div class="tab-btn active">Terminal Commands</div>
         </div>
         <div class="tab-content"><span class="c-dim"># Interactive TUI &amp; quick table dump</span>
-ach                  <span class="c-dim"># Launch interactive selector, search &amp; manager (alias: antig-m)</span>
-ach -l               <span class="c-dim"># View 15 most recent sessions (alias: antig-h)</span>
+ach                  <span class="c-dim"># Launch interactive selector, search &amp; manager</span>
+ach -l               <span class="c-dim"># View 15 most recent sessions</span>
 ach --all            <span class="c-dim"># Show entire history archive</span>
 ach --days 7         <span class="c-dim"># Filter sessions from past 7 days</span>
 ach -s "query"       <span class="c-dim"># FTS5 search across titles and transcripts</span>

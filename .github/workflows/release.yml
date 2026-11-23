@@ -18,7 +18,7 @@ jobs:
       - name: Package Standalone Archive
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ARCHIVE_NAME="sessionlist-${GITHUB_REF_NAME}.tar.gz"
+          ARCHIVE_NAME="ach-cli-${GITHUB_REF_NAME}.tar.gz"
           tar --exclude='.git' --exclude='.github' -czvf "$ARCHIVE_NAME" *
           echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
 

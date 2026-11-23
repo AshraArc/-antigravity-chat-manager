@@ -3,7 +3,7 @@ set -e
 
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT_PATH="$SCRIPT_DIR/sessionlist.py"
+SCRIPT_PATH="$SCRIPT_DIR/ach.py"
 CONFIG_DIR="$HOME/.gemini/antigravity-cli/plugin_data/sessionlist"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
@@ -61,11 +61,12 @@ with open(cfg_path, 'w', encoding='utf-8') as f:
 " 2>/dev/null || true
 
 # 5. Auto-register skills in Antigravity skill directories if they exist
-SKILL_SRC="$SCRIPT_DIR/skills/sessionlist"
+SKILL_SRC="$SCRIPT_DIR/skills/ach"
 if [ -d "$SKILL_SRC" ]; then
     for target_dir in "$HOME/.gemini/antigravity-cli/skills" "$HOME/.agents/skills"; do
         if [ -d "$target_dir" ]; then
-            dest="$target_dir/sessionlist"
+            rm -rf "$target_dir/sessionlist"
+            dest="$target_dir/ach"
             rm -rf "$dest"
             ln -sf "$SKILL_SRC" "$dest" 2>/dev/null || cp -r "$SKILL_SRC" "$dest"
             echo "✔ Registered skill in $dest"

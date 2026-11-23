@@ -21,7 +21,7 @@ from datetime import datetime
 
 # Import sessionlist module under test
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import sessionlist
+import ach
 
 class TestSQLiteEngine(unittest.TestCase):
     def setUp(self):
@@ -31,32 +31,29 @@ class TestSQLiteEngine(unittest.TestCase):
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(self.brain_dir, exist_ok=True)
 
-        self.orig_data_dir = sessionlist.DATA_DIR
-        self.orig_brain_dir = sessionlist.BRAIN_DIR
-        self.orig_history_db = sessionlist.HISTORY_DB
-        self.orig_master_tsv = sessionlist.MASTER_TSV
-        self.orig_lock_file = sessionlist.LOCK_FILE
+        self.orig_data_dir = ach.DATA_DIR
+        self.orig_brain_dir = ach.BRAIN_DIR
+        self.orig_history_db = ach.HISTORY_DB
+        self.orig_lock_file = ach.LOCK_FILE
 
-        sessionlist.DATA_DIR = self.data_dir
-        sessionlist.BRAIN_DIR = self.brain_dir
-        sessionlist.HISTORY_DB = os.path.join(self.data_dir, "history.db")
-        sessionlist.MASTER_TSV = os.path.join(self.data_dir, "master_history.tsv")
-        sessionlist.LOCK_FILE = os.path.join(self.data_dir, "history.lock")
+        ach.DATA_DIR = self.data_dir
+        ach.BRAIN_DIR = self.brain_dir
+        ach.HISTORY_DB = os.path.join(self.data_dir, "history.db")
+        ach.LOCK_FILE = os.path.join(self.data_dir, "history.lock")
 
     def tearDown(self):
-        sessionlist.DATA_DIR = self.orig_data_dir
-        sessionlist.BRAIN_DIR = self.orig_brain_dir
-        sessionlist.HISTORY_DB = self.orig_history_db
-        sessionlist.MASTER_TSV = self.orig_master_tsv
-        sessionlist.LOCK_FILE = self.orig_lock_file
+        ach.DATA_DIR = self.orig_data_dir
+        ach.BRAIN_DIR = self.orig_brain_dir
+        ach.HISTORY_DB = self.orig_history_db
+        ach.LOCK_FILE = self.orig_lock_file
         shutil.rmtree(self.test_root, ignore_errors=True)
 
     def test_01_init_db_and_pragmas(self):
         """Verify DB initialization, tables, FTS5 virtual table, and pragmas."""
-        sessionlist.init_db()
-        self.assertTrue(os.path.exists(sessionlist.HISTORY_DB))
+        ach.init_db()
+        self.assertTrue(os.path.exists(ach.HISTORY_DB))
 
-        conn = sessionlist.get_db_connection()
+        conn = ach.get_db_connection()
         try:
             # Check journal mode
             jm = conn.execute("PRAGMA journal_mode;").fetchone()[0]
@@ -75,23 +72,16 @@ class TestSQLiteEngine(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_02_migration_from_tsv_to_sqlite(self):
-        """Verify seamless automatic migration from legacy master_history.tsv."""
-        # Create legacy TSV entries
+    def test_02_write_and_read_sessions(self):
+        """Verify writing and reading sessions directly in SQLite."""
+        ach.init_db()
         now = time.time()
-        tsv_lines = [
-            f"cid-001\t{now - 100}\t5\tWork\tProject Alpha Architecture\n",
-            f"cid-002\t{now - 50}\t12\tResearch\tDeep Learning Transformers\n",
-            f"cid-003\t{now - 10}\t3\tPersonal\tVacation Plans\n"
-        ]
-        with open(sessionlist.MASTER_TSV, "w", encoding="utf-8") as f:
-            f.writelines(tsv_lines)
-
-        migrated = sessionlist.migrate_tsv_to_sqlite()
-        self.assertEqual(migrated, 3)
+        ach.write_session({"id": "cid-001", "mtime": now - 100, "msgs": 5, "group": "Work", "title": "Project Alpha Architecture"})
+        ach.write_session({"id": "cid-002", "mtime": now - 50, "msgs": 12, "group": "Research", "title": "Deep Learning Transformers"})
+        ach.write_session({"id": "cid-003", "mtime": now - 10, "msgs": 3, "group": "Personal", "title": "Vacation Plans"})
 
         # Verify records in SQLite
-        sessions = sessionlist.read_sessions()
+        sessions = ach.read_sessions()
         self.assertEqual(len(sessions), 3)
 
         # Check order (ordered by mtime DESC)
@@ -102,15 +92,14 @@ class TestSQLiteEngine(unittest.TestCase):
         self.assertEqual(sessions[2]["id"], "cid-001")
         self.assertEqual(sessions[2]["msgs"], 5)
 
-        # Verify idempotency (second migration run should not duplicate rows)
-        migrated_again = sessionlist.migrate_tsv_to_sqlite()
-        self.assertEqual(migrated_again, 0)
-        sessions_again = sessionlist.read_sessions()
+        # Verify idempotency (updating an existing session should not duplicate rows)
+        ach.write_session({"id": "cid-003", "mtime": now - 10, "msgs": 4, "group": "Personal", "title": "Vacation Plans"})
+        sessions_again = ach.read_sessions()
         self.assertEqual(len(sessions_again), 3)
 
     def test_03_fts5_full_text_search(self):
         """Test FTS5 search across title, group, workspace, and transcript content."""
-        sessionlist.init_db()
+        ach.init_db()
 
         # Seed test sessions with content
         s1 = {
@@ -142,35 +131,35 @@ class TestSQLiteEngine(unittest.TestCase):
         }
 
         for s in (s1, s2, s3):
-            sessionlist.write_session(s)
+            ach.write_session(s)
 
         # 1. Search by title keyword
-        res = sessionlist.search_sessions_fts("optimization")
+        res = ach.search_sessions_fts("optimization")
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["id"], "cid-alpha")
 
         # 2. Search by group name
-        res = sessionlist.search_sessions_fts("Frontend")
+        res = ach.search_sessions_fts("Frontend")
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["id"], "cid-beta")
 
         # 3. Search by workspace substring
-        res = sessionlist.search_sessions_fts("devops")
+        res = ach.search_sessions_fts("devops")
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["id"], "cid-gamma")
 
         # 4. Search deep within message content
-        res = sessionlist.search_sessions_fts("psycopg3")
+        res = ach.search_sessions_fts("psycopg3")
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["id"], "cid-alpha")
 
-        res_zustand = sessionlist.search_sessions_fts("Zustand")
+        res_zustand = ach.search_sessions_fts("Zustand")
         self.assertEqual(len(res_zustand), 1)
         self.assertEqual(res_zustand[0]["id"], "cid-beta")
 
         # 5. Empty / non-matching queries
-        self.assertEqual(sessionlist.search_sessions_fts(""), [])
-        self.assertEqual(sessionlist.search_sessions_fts("nonexistenttermXYZ"), [])
+        self.assertEqual(ach.search_sessions_fts(""), [])
+        self.assertEqual(ach.search_sessions_fts("nonexistenttermXYZ"), [])
 
     def test_04_sync_antigravity_summaries_db(self):
         """Test direct discovery and sync with Antigravity's conversation_summaries.db."""
@@ -205,10 +194,10 @@ class TestSQLiteEngine(unittest.TestCase):
         orig_expanduser = os.path.expanduser
         try:
             os.path.expanduser = lambda path: path.replace("~", fake_home) if path.startswith("~") else orig_expanduser(path)
-            synced = sessionlist.sync_antigravity_summaries_db()
+            synced = ach.sync_antigravity_summaries_db()
             self.assertEqual(synced, 2)
 
-            sessions = sessionlist.read_sessions()
+            sessions = ach.read_sessions()
             self.assertEqual(len(sessions), 2)
             cids = {s["id"] for s in sessions}
             self.assertIn("agy-001", cids)
@@ -237,8 +226,8 @@ class TestSQLiteEngine(unittest.TestCase):
         cid_to_keep = "keeper-111"
 
         # 1. Setup Brain Directory
-        brain_del = os.path.join(sessionlist.BRAIN_DIR, cid_to_del)
-        brain_keep = os.path.join(sessionlist.BRAIN_DIR, cid_to_keep)
+        brain_del = os.path.join(ach.BRAIN_DIR, cid_to_del)
+        brain_keep = os.path.join(ach.BRAIN_DIR, cid_to_keep)
         os.makedirs(brain_del, exist_ok=True)
         os.makedirs(brain_keep, exist_ok=True)
         with open(os.path.join(brain_del, "data.txt"), "w") as f: f.write("dummy")
@@ -266,18 +255,18 @@ class TestSQLiteEngine(unittest.TestCase):
         c_sum.close()
 
         # 5. Setup history.db and mirror files
-        sessionlist.init_db()
-        sessionlist.write_session({"id": cid_to_del, "title": "Delete Me", "mtime": time.time(), "msgs": 1, "group": "Test"})
-        sessionlist.write_session({"id": cid_to_keep, "title": "Keep Me", "mtime": time.time(), "msgs": 1, "group": "Test"})
+        ach.init_db()
+        ach.write_session({"id": cid_to_del, "title": "Delete Me", "mtime": time.time(), "msgs": 1, "group": "Test"})
+        ach.write_session({"id": cid_to_keep, "title": "Keep Me", "mtime": time.time(), "msgs": 1, "group": "Test"})
 
         orig_expanduser = os.path.expanduser
-        orig_get_dirs = sessionlist.get_all_data_dirs
+        orig_get_dirs = ach.get_all_data_dirs
         try:
             os.path.expanduser = lambda path: path.replace("~", fake_home) if path.startswith("~") else orig_expanduser(path)
-            sessionlist.get_all_data_dirs = lambda: [sessionlist.DATA_DIR, mock_plugin_data]
+            ach.get_all_data_dirs = lambda: [ach.DATA_DIR, mock_plugin_data]
 
             # Execute multi-layer purge
-            purged_count = sessionlist.purge_chats_from_all_storage([cid_to_del])
+            purged_count = ach.purge_chats_from_all_storage([cid_to_del])
             self.assertEqual(purged_count, 1)
 
             # Check 1: Brain folder
@@ -304,22 +293,22 @@ class TestSQLiteEngine(unittest.TestCase):
             c_check.close()
 
             # Check 5: history.db
-            remaining_sessions = sessionlist.read_sessions()
+            remaining_sessions = ach.read_sessions()
             self.assertEqual(len(remaining_sessions), 1)
             self.assertEqual(remaining_sessions[0]["id"], cid_to_keep)
 
             # Check FTS index cleaned
-            search_res = sessionlist.search_sessions_fts("Delete")
+            search_res = ach.search_sessions_fts("Delete")
             self.assertEqual(len(search_res), 0)
         finally:
             os.path.expanduser = orig_expanduser
-            sessionlist.get_all_data_dirs = orig_get_dirs
+            ach.get_all_data_dirs = orig_get_dirs
 
 
 # Multiprocessing helper for Concurrency Test
 def _writer_worker(db_path, worker_id, iterations):
     for i in range(iterations):
-        conn = sessionlist.get_db_connection(db_path)
+        conn = ach.get_db_connection(db_path)
         try:
             cid = f"worker-{worker_id}-item-{i}"
             now = time.time()
@@ -330,7 +319,7 @@ def _writer_worker(db_path, worker_id, iterations):
                     (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """, (cid, datetime.now().isoformat(), "Just now", f"Worker {worker_id} Item {i}", f"Group{worker_id}", "/ws", i, now))
-                sessionlist.update_fts_entry(conn, cid, f"Worker {worker_id} Item {i}", f"Group{worker_id}", "/ws", f"content {i}")
+                ach.update_fts_entry(conn, cid, f"Worker {worker_id} Item {i}", f"Group{worker_id}", "/ws", f"content {i}")
         finally:
             conn.close()
         time.sleep(0.001)
@@ -338,7 +327,7 @@ def _writer_worker(db_path, worker_id, iterations):
 def _reader_worker(db_path, iterations, results_queue):
     successes = 0
     for _ in range(iterations):
-        conn = sessionlist.get_db_connection(db_path)
+        conn = ach.get_db_connection(db_path)
         try:
             cur = conn.cursor()
             rows = cur.execute("SELECT count(*) FROM sessions;").fetchone()
@@ -355,7 +344,7 @@ class TestSQLiteConcurrency(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix="sl_concurrency_")
         self.db_path = os.path.join(self.test_dir, "history.db")
-        sessionlist.init_db(db_path=self.db_path)
+        ach.init_db(db_path=self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -386,7 +375,7 @@ class TestSQLiteConcurrency(unittest.TestCase):
             self.assertFalse(p.is_alive(), "Process hung or deadlocked!")
 
         # Verify all writer rows were inserted
-        conn = sessionlist.get_db_connection(self.db_path)
+        conn = ach.get_db_connection(self.db_path)
         try:
             total_rows = conn.execute("SELECT count(*) FROM sessions;").fetchone()[0]
             self.assertEqual(total_rows, num_writers * iterations)

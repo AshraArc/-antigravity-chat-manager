@@ -2,14 +2,14 @@
 # Ach! 1-Line Remote Uninstaller
 set -e
 
-INSTALL_BASE="$HOME/.local/share/sessionlist"
+INSTALL_BASE="$HOME/.local/share/ach"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_FILE="$HOME/.gemini/antigravity-cli/plugin_data/sessionlist/config.json"
 
 echo "Uninstalling Ach!..."
 
-# 1. Remove cloned code
-rm -rf "$INSTALL_BASE"
+# 1. Remove cloned code (both current and legacy)
+rm -rf "$INSTALL_BASE" "$HOME/.local/share/sessionlist"
 
 # 2. Read custom alias from config if present
 if [ -f "$CONFIG_FILE" ] && command -v python3 >/dev/null 2>&1; then

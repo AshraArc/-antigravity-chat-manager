@@ -1,6 +1,6 @@
 {
-  "name": "sessionlist",
-  "displayName": "sessionList",
+  "name": "ach",
+  "displayName": "Ach! — Archive Chat History",
   "version": "2.2.1",
   "description": "Ach! (Archive Chat History) — unified session manager for Antigravity",
   "author": {
@@ -10,7 +10,7 @@
   "repository": "https://github.com/AshraArc/ach-cli",
   "license": "MIT",
   "keywords": [
-    "sessionlist",
+    "ach",
     "sessions",
     "chat-history",
     "notebooks",

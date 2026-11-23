@@ -5,7 +5,7 @@ import subprocess
 
 class TestSessionListCLI(unittest.TestCase):
     def setUp(self):
-        self.script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sessionlist.py"))
+        self.script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "ach.py"))
 
     def test_version_flags(self):
         for flag in ["--version", "-v"]:
