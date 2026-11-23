@@ -283,21 +283,20 @@ def select_new_chat_workspace(title="Start New Antigravity Chat", prompt="Select
     recent_dirs = [d for d in all_recent if d != cwd and d != default_root]
 
     clear_screen()
-    print("==================================================")
-    print(f"          {title.center(38)}              ")
-    print("==================================================")
+    print(f"Ach! · {title.lower()}")
+    print("─" * 52)
     if current_ws:
-        print(f"  Current workspace: {current_ws}")
-        print("--------------------------------------------------")
+        print(f"  workspace: {current_ws}")
+        print("─" * 52)
     print(f"  [1] Current Directory (Default)")
-    print(f"      -> {cwd}")
+    print(f"      {cwd}")
 
     option_map = {1: cwd}
     next_num = 2
 
     if default_root and default_root != cwd:
         print(f"  [{next_num}] Antigravity Root")
-        print(f"      -> {default_root}")
+        print(f"      {default_root}")
         option_map[next_num] = default_root
         next_num += 1
 
@@ -309,9 +308,9 @@ def select_new_chat_workspace(title="Start New Antigravity Chat", prompt="Select
             next_num += 1
 
     custom_key = "c"
-    print(f"\n  [{custom_key}] Custom Folder Path (type manually)")
-    print("  [q] Cancel (return to menu)")
-    print("--------------------------------------------------")
+    print(f"\n  [{custom_key}] Custom path")
+    print("  [q] Cancel")
+    print("─" * 52)
 
     choice = input(prompt).strip()
 
@@ -1664,15 +1663,14 @@ def configure_alias_interactive():
             pass
 
     current_alias = cfg.get("cli_command", "agy")
-    print("==========================================")
-    print("           CLI Alias & Shortcuts          ")
-    print("==========================================")
-    print(f"  Current Launcher Alias: '{current_alias}'")
-    print(f"  Active Shortcuts:       {current_alias}-h (list), {current_alias}-m (menu)")
-    print("------------------------------------------")
+    print("Ach! · cli alias & shortcuts")
+    print("─" * 46)
+    print(f"  Launcher alias:   {current_alias}")
+    print(f"  Shortcuts:        {current_alias}-h (list), {current_alias}-m (menu)")
+    print("─" * 46)
     print("Enter new alias name (e.g. 'ag', 'antig', 'ai', 'agy')")
     print("Or press Enter / ESC to keep current.")
-    print("------------------------------------------")
+    print("─" * 46)
     new_alias = get_prompt_input("New Alias > ")
 
     if not new_alias or new_alias == "esc" or new_alias == current_alias:
@@ -1717,18 +1715,17 @@ def configure_time_window():
     cur_days = cfg.get("default_days", 0)
     cur_str = f"Past {cur_days} days" if cur_days > 0 else "All time (No limit)"
 
-    print("==========================================")
-    print("        Default Time Window Filter        ")
-    print("==========================================")
-    print(f"  Current Default: {cur_str}")
-    print("------------------------------------------")
+    print("Ach! · default time window filter")
+    print("─" * 46)
+    print(f"  Current default: {cur_str}")
+    print("─" * 46)
     print("  [1] All time (Show all chats)")
     print("  [2] Past 7 days")
     print("  [3] Past 14 days")
     print("  [4] Past 30 days")
     print("  [5] Custom number of days")
     print("  [b] Cancel / ESC")
-    print("------------------------------------------")
+    print("─" * 46)
     ch = get_prompt_input("Select > ").lower()
 
     if ch in ("b", "back", "esc"):
@@ -1762,16 +1759,15 @@ def show_storage_info():
     db_size = os.path.getsize(HISTORY_DB) if os.path.exists(HISTORY_DB) else 0
     tsv_size = os.path.getsize(MASTER_TSV) if os.path.exists(MASTER_TSV) else 0
 
-    print("==========================================")
-    print("         Storage & Diagnostics            ")
-    print("==========================================")
+    print("Ach! · storage & diagnostics")
+    print("─" * 46)
     print(f"  Data Directory:      {DATA_DIR}")
     print(f"  SQLite Database:     {HISTORY_DB}")
     print(f"  DB Size on Disk:     {db_size} bytes ({db_size/1024:.2f} KB)")
     print(f"  Master History TSV:  {MASTER_TSV} ({tsv_size/1024:.2f} KB)")
     print(f"  Total Chats Saved:   {len(records)} sessions")
     print(f"  Antigravity Brain:   {BRAIN_DIR}")
-    print("------------------------------------------")
+    print("─" * 46)
     get_prompt_input("Press Enter or ESC to return...")
 
 def backup_history_log():
@@ -1793,12 +1789,10 @@ def backup_history_log():
         if os.path.exists(MASTER_TSV):
             shutil.copy2(MASTER_TSV, bak_tsv_path)
 
-        print("==========================================")
-        print("          History Backup Created          ")
-        print("==========================================")
-        print(f"  SQLite DB Backup saved to:")
-        print(f"  {bak_db_path}")
-        print("------------------------------------------")
+        print("Ach! · history backup created")
+        print("─" * 46)
+        print(f"  SQLite DB Backup saved to:\n  {bak_db_path}")
+        print("─" * 46)
     except Exception as e:
         print(f"Error creating backup: {e}")
 
@@ -1806,9 +1800,8 @@ def backup_history_log():
 
 def restore_history_log():
     clear_screen()
-    print("==========================================")
-    print("         Restore History Log (SQLite)     ")
-    print("==========================================")
+    print("Ach! · restore history log (sqlite)")
+    print("─" * 46)
     
     # Look for available backups in DATA_DIR (both DB and TSV)
     db_baks = sorted(glob.glob(os.path.join(DATA_DIR, "history_backup_*.db")), reverse=True)
@@ -1817,7 +1810,7 @@ def restore_history_log():
     if not baks:
         print("  No previous backups found in:")
         print(f"  {DATA_DIR}")
-        print("------------------------------------------")
+        print("─" * 46)
         get_prompt_input("Press Enter or ESC to return...")
         return
 
@@ -1826,7 +1819,7 @@ def restore_history_log():
         bname = os.path.basename(b)
         size = os.path.getsize(b)
         print(f"  [{idx}] {bname} ({size} bytes)")
-    print("------------------------------------------")
+    print("─" * 46)
     print("Enter number to restore, or ESC/b to cancel")
     choice = get_prompt_input("Select > ")
 
@@ -1932,12 +1925,11 @@ def export_chat_to_markdown():
         time.sleep(1)
         return
 
-    print("==========================================")
-    print("        Export Conversation to MD         ")
-    print("==========================================")
+    print("Ach! · export conversation to md")
+    print("─" * 46)
     for idx, c in enumerate(chats[:15], 1):
         print(f"  [{idx:2d}] {c['time_label']:<10} {c['title'][:36]}")
-    print("------------------------------------------")
+    print("─" * 46)
     print("Options: <num> export chat | 'all' export all | ESC back")
     choice = get_prompt_input("Select > ").strip().lower()
 
@@ -1961,14 +1953,13 @@ def export_chat_to_markdown():
 
 def uninstall_sessionlist():
     clear_screen()
-    print("==========================================")
-    print("          Uninstall sessionList           ")
-    print("==========================================")
-    print("This will remove sessionList binaries and")
+    print("Ach! · uninstall sessionlist")
+    print("─" * 46)
+    print("This will remove Ach! binaries and")
     print("shortcuts from ~/.local/bin/ and")
     print("~/.local/share/sessionlist/.")
     print("\nYour conversation history will remain safe.")
-    print("------------------------------------------")
+    print("─" * 46)
     confirm = get_prompt_input("Are you sure you want to uninstall? (y/N): ").strip().lower()
 
     if confirm != "y":
@@ -2011,27 +2002,26 @@ def uninstall_sessionlist():
         except Exception:
             pass
 
-    print("\n✔ Successfully uninstalled sessionList!")
+    print("\n✔ Successfully uninstalled Ach!!")
     if removed_files:
         print(f"  Removed binaries: {', '.join(removed_files)}")
-    print("\nThank you for using sessionList.")
+    print("\nThank you for using Ach!.")
     sys.exit(0)
 
 def settings_view():
     while True:
         clear_screen()
-        print("==========================================")
-        print("                 Settings                 ")
-        print("==========================================")
+        print("Ach! · settings")
+        print("─" * 46)
         print("  [1] CLI Alias & Shortcuts (Rename)")
         print("  [2] Default Time Window Filter")
         print("  [3] Export Chats to Markdown (.md)")
         print("  [4] Backup Master History (TSV)")
         print("  [5] Restore Master History from Backup")
         print("  [6] Storage & Diagnostics Info")
-        print("  [7] Uninstall sessionList")
+        print("  [7] Uninstall Ach!")
         print("  [b] Back / ESC")
-        print("------------------------------------------")
+        print("─" * 46)
         choice = get_prompt_input("Select > ").lower()
 
         if choice in ("b", "back", "q", "quit", "esc"):
@@ -2127,9 +2117,8 @@ def all_chats_view():
         chats = get_all_chats()
         for idx, c in enumerate(chats, 1):
             c["index"] = idx
-        print("==========================================")
-        print("                All Chats                 ")
-        print("==========================================")
+        print("Ach! · all chats")
+        print("─" * 76)
         render_terminal_table(chats, limit=None)
         print("\nCmds: <num> resume | m <num> move | e <num> edit | x <num|all> export | d <n1,n2..> del | n new | Esc/b back")
         cmd = get_prompt_input("Select > ")
@@ -2245,7 +2234,7 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v"):
-            print("Chrono (sessionList) v2.2.0 ⚡ Antigravity Session Recall (by AshraArc)")
+            print("Ach! v2.2.0 — Archive Chat History")
             return
         elif arg in ("--update", "update"):
             install_base = os.path.expanduser("~/.local/share/sessionlist")
@@ -2258,7 +2247,7 @@ def main():
                     if res.returncode != 0:
                         print(f"❌ Update failed:\n{res.stderr.strip() or res.stdout.strip()}")
                         return
-                    print(res.stdout.strip() if res.stdout.strip() else "✔ sessionList is already up to date.")
+                    print(res.stdout.strip() if res.stdout.strip() else "✔ Ach! is already up to date.")
 
                     # 1. Housekeeping: prune obsolete pycache, temp files, and old backups in install base
                     for root, dirs, files in os.walk(install_base, onerror=lambda _: None):
@@ -2308,28 +2297,45 @@ def main():
             uninstall_sessionlist()
             return
         elif arg in ("--help", "-h"):
-            print("""Chrono v2.2.0 ⚡ Antigravity Instant Session Recall & FTS5 Search
-Usage:
-  ach [options]             Session recall CLI
-  <cmd>-h [options]         Quick non-interactive table dump
-  <cmd>-m                   Interactive dashboard menu
+            print("""NAME
+  ach - Archive Chat History
 
-Options:
+SYNOPSIS
+  ach [options]
+  <cmd>-h [options]
+  <cmd>-m
+
+DESCRIPTION
+  Instant session recall and full-text search (FTS5) for Google
+  Antigravity CLI conversations. Supports multi-workspace discovery,
+  session tagging, transplanting, and Markdown export.
+
+OPTIONS
   -h, --help                Show this help message
   -v, --version             Show version information
   -l, --list                Show recent chats (default for <cmd>-h)
   -a, --all, --list-all     Show complete uncapped history
-  -s, --search, --search-cli <query> Search chat titles, history and notebooks
+  -s, --search <query>      Search chat titles, history and notebooks
   -x, --export <id|all>     Export session(s) directly to Markdown (.md)
-  -d, --delete, --del, rm <ids...> Delete session(s) non-interactively (e.g. -d 1,2 or rm 1-3)
+  -d, --delete, --del, rm <ids...>
+                            Delete session(s) non-interactively (e.g. -d 1,2 or rm 1-3)
   --days <N>                Filter chats from the last N days (e.g. --days 7)
   -H, --hours <N>           Filter chats from the last N hours (e.g. --hours 2)
   mv <id|num> [target_dir]  Move/transplant chat to target directory (default: CWD)
-  mv -g, --group <name> [target_dir] Move all chats in a group to target directory
+  mv -g, --group <name> [target_dir]
+                            Move all chats in a group to target directory
   --groups-cli              List all notebook groups
   --set-title <id> "<title>" Set clean abstracted session title
   --update                  Check and pull latest updates
-  --uninstall               Uninstall sessionList and its shortcuts
+  --uninstall               Uninstall Ach! and its shortcuts
+
+EXAMPLES
+  ach                       Launch interactive menu
+  ach -l                    Show 15 most recent sessions
+  ach -s "auth bug"         Search transcript contents and titles via FTS5
+  ach -x 1                  Export session 1 to Markdown
+  ach mv 2 ~/projects/api   Move session 2 workspace to ~/projects/api
+  ach rm 1-3                Delete sessions 1 through 3
 """)
             return
         elif arg in ("mv", "move"):
@@ -2498,15 +2504,14 @@ Options:
 
     while True:
         clear_screen()
-        print("==========================================")
-        print("          Chrono ⚡ Antigravity           ")
-        print("==========================================")
+        print("Ach! v2.2.0")
+        print("─" * 46)
         print("  [1] All Chats")
         print("  [2] Search & Resume")
         print("  [3] Groups & Notebooks")
         print("  [4] Settings")
-        print("  [q] Quit (or press ESC)")
-        print("------------------------------------------")
+        print("  [q] Quit")
+        print("─" * 46)
         choice = get_prompt_input("Select > ").lower()
 
         if choice in ("q", "quit", "exit", "esc"):

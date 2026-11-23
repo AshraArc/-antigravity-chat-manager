@@ -1,9 +1,9 @@
 ---
 name: sessionlist
-description: High-efficiency session history and notebook lookup for Antigravity with SQLite WAL + FTS5 full-text recall. Trigger on /history, /sessions, /find, /recall, search, or natural language requests for chat history and past transcript content.
+description: High-efficiency session history and notebook lookup for Antigravity with Ach! (SQLite WAL + FTS5 full-text recall). Trigger on /history, /sessions, /find, /recall, search, or natural language requests for chat history and past transcript content.
 ---
 
-# sessionList Skill
+# Ach! (ach) Skill
 
 Direct, zero-token overhead session history recall and past transcript content search from `history.db` (SQLite WAL + FTS5 full-text engine).
 

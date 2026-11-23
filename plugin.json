@@ -2,7 +2,7 @@
   "name": "sessionlist",
   "displayName": "sessionList",
   "version": "2.2.0",
-  "description": "Unified session manager for Antigravity: interactive CLI browser in the terminal, FTS5 full-text recall, and /history & /find slash commands in chat",
+  "description": "Ach! (Archive Chat History) — unified session manager for Antigravity",
   "author": {
     "name": "AshraArc",
     "url": "https://github.com/AshraArc/sessionList"
