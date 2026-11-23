@@ -2,7 +2,8 @@
 # sessionList 1-Line Remote Installer
 set -e
 
-REPO_URL="https://github.com/AshraArc/-antigravity-chat-manager.git"
+PRIMARY_REPO="https://github.com/AshraArc/sessionList.git"
+FALLBACK_REPO="https://github.com/AshraArc/-antigravity-chat-manager.git"
 INSTALL_BASE="$HOME/.local/share/sessionlist"
 BIN_DIR="$HOME/.local/bin"
 
@@ -10,11 +11,18 @@ mkdir -p "$BIN_DIR"
 
 if [ -d "$INSTALL_BASE/.git" ]; then
     echo "Updating existing sessionList..."
-    git -C "$INSTALL_BASE" pull --quiet
+    git -C "$INSTALL_BASE" pull --quiet || {
+        echo "Pull failed, attempting remote update..."
+        git -C "$INSTALL_BASE" remote set-url origin "$PRIMARY_REPO" 2>/dev/null || true
+        git -C "$INSTALL_BASE" pull --quiet 2>/dev/null || true
+    }
 else
     echo "Downloading sessionList..."
     rm -rf "$INSTALL_BASE"
-    git clone --depth 1 --quiet "$REPO_URL" "$INSTALL_BASE"
+    if ! git clone --depth 1 --quiet "$PRIMARY_REPO" "$INSTALL_BASE" 2>/dev/null; then
+        echo "Primary repo failed, falling back to backup repository URL..."
+        git clone --depth 1 --quiet "$FALLBACK_REPO" "$INSTALL_BASE"
+    fi
 fi
 
 # Determine command prefix:
@@ -65,6 +73,23 @@ done
 if [ -d "$INSTALL_BASE" ]; then
     find "$INSTALL_BASE" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     find "$INSTALL_BASE" -type f -name "*.tmp" -delete 2>/dev/null || true
+fi
+
+# 6. Auto-register skills in Antigravity skill directories if they exist
+SKILL_SRC="$INSTALL_BASE/skills/sessionlist"
+if [ -d "$SKILL_SRC" ]; then
+    TARGET_SKILL_DIRS=(
+        "$HOME/.gemini/antigravity-cli/skills"
+        "$HOME/.agents/skills"
+    )
+    for target_dir in "${TARGET_SKILL_DIRS[@]}"; do
+        if [ -d "$target_dir" ]; then
+            dest="$target_dir/sessionlist"
+            rm -rf "$dest"
+            ln -sf "$SKILL_SRC" "$dest" 2>/dev/null || cp -r "$SKILL_SRC" "$dest"
+            echo "✔ Registered skill in $dest"
+        fi
+    done
 fi
 
 echo "✔ Installed ${CMD_PREFIX}-h, ${CMD_PREFIX}-m to $BIN_DIR"

@@ -1,27 +1,42 @@
 ---
 name: sessionlist
-description: High-efficiency session history and notebook lookup for Antigravity. Trigger on /history, /sessions, or natural language requests for chat history.
+description: High-efficiency session history and notebook lookup for Antigravity with SQLite WAL + FTS5 full-text recall. Trigger on /history, /sessions, /find, /recall, search, or natural language requests for chat history and past transcript content.
 ---
 
 # sessionList Skill
 
-Direct, zero-token overhead session history recall from `history.db` (SQLite WAL + FTS5 full-text engine).
+Direct, zero-token overhead session history recall and past transcript content search from `history.db` (SQLite WAL + FTS5 full-text engine).
+
+## Tool Resolution
+Run the command using the installed CLI binary if available (`ach`, `sessionlist`), or via `python3 sessionlist.py`:
+- Binary: `sessionlist` / `ach`
+- Or script: `python3 sessionlist.py` (or specify path to local installation)
 
 ## FAST PATH (Standard In-Chat History)
 
-Whenever the user asks for chat history (e.g. `/history`, `show my chats`, `history of past 7 days`):
+Whenever the user asks for chat history (e.g. `/history`, `/sessions`, `show my chats`, `history of past 7 days`):
 1. **Execute the CLI tool directly**:
-   - Recent chats: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --list`
-   - Filter by days: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --days <N>`
-   - Filter by hours: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --hours <N>`
-   - Keyword search: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --search-cli "<query>"`
-   - All history: `python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --all`
+   - Recent chats: `sessionlist --list` (or `python3 sessionlist.py --list`)
+   - Filter by days: `sessionlist --days <N>` (or `python3 sessionlist.py --days <N>`)
+   - Filter by hours: `sessionlist --hours <N>` (or `python3 sessionlist.py --hours <N>`)
+   - All history: `sessionlist --all` (or `python3 sessionlist.py --all`)
 2. **CLEAN TOOL SUMMARY**:
    - Always set `toolSummary` to a clean short phrase (e.g. `History lookup`, `Session history`).
 3. **ZERO-TOKEN FAST OUTPUT**:
    - The CLI tool outputs a pre-aligned table formatted strictly for an 80-column terminal.
    - Output the tool result DIRECTLY inside a code block or verbatim. DO NOT re-tokenize or summarize.
 
+## FULL-TEXT SEARCH & RECALL (/find, /recall)
+
+Whenever the user searches past transcripts, queries prior discussions, or uses `/find <query>` / `/recall <query>`:
+1. **Execute FTS5 search directly**:
+   - Recipe: `sessionlist -s "<query>"` (or `python3 sessionlist.py -s "<query>"`)
+   - Also accepts `--search-cli "<query>"`.
+2. **CLEAN TOOL SUMMARY**:
+   - Set `toolSummary` to a short phrase (e.g. `Session search`, `Transcript recall`).
+3. **OUTPUT**:
+   - Return matched sessions and contextual snippets directly to the user.
+
 ## ASYNC CHAT TITLING (Turn 1 or 2)
 On turn 1 or turn 2 of a session, if the current session still has a raw/default title, run in the background:
-`python3 /mnt/a/anti-g/projects/sessionList/sessionlist.py --set-title <current_cid> "<Clean 2-to-4 Word Title>"`
+`sessionlist --set-title <current_cid> "<Clean 2-to-4 Word Title>"` (or `python3 sessionlist.py --set-title <current_cid> "<Clean 2-to-4 Word Title>"`)

@@ -60,6 +60,19 @@ with open(cfg_path, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
 " 2>/dev/null || true
 
+# 5. Auto-register skills in Antigravity skill directories if they exist
+SKILL_SRC="$SCRIPT_DIR/skills/sessionlist"
+if [ -d "$SKILL_SRC" ]; then
+    for target_dir in "$HOME/.gemini/antigravity-cli/skills" "$HOME/.agents/skills"; do
+        if [ -d "$target_dir" ]; then
+            dest="$target_dir/sessionlist"
+            rm -rf "$dest"
+            ln -sf "$SKILL_SRC" "$dest" 2>/dev/null || cp -r "$SKILL_SRC" "$dest"
+            echo "✔ Registered skill in $dest"
+        fi
+    done
+fi
+
 echo ""
 echo "✔ Created executable binaries in $INSTALL_DIR:"
 echo "   - ${CMD_NAME}-h (Quick table dump)"
@@ -79,6 +92,7 @@ echo "     Run:  ${CMD_NAME}-h  (quick list)"
 echo "     Run:  ${CMD_NAME}-m  (interactive menu)"
 echo ""
 echo "  2. In Antigravity (Inside Chat):"
+echo "     Commands: /find, /recall, /history, /sessions"
 echo "     Install plugin: agy plugin install \"$SCRIPT_DIR\""
-echo "     Ask agent: 'show my chat history' or 'history of past 7 days'"
+echo "     Ask agent: 'show my chat history' or search with '/find <topic>'"
 echo "=================================================="

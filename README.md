@@ -1,8 +1,24 @@
 # sessionList
 
-Unified session manager and history recall for **Google Antigravity CLI (`agy`)**.
+> **Stop digging through raw JSONL transcripts. Instant resume & FTS5 full-text recall for Google Antigravity (`agy`).**
 
 Created by **AshraArc**.
+
+### Benchmark Highlight
+- ⚡ **< 4ms FTS5 Full-Text Search**: Full SQLite WAL index queries over complete conversation histories in single-digit milliseconds.
+- 🎯 **1-Key Resume**: Instant interactive jumping without copy-pasting 36-character session UUIDs.
+- 🧹 **Batch Clean**: Prune dead or ephemeral chats in bulk with automatic index synchronization.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  DEMO / PREVIEW                                                        │
+│  $ antig-m                                                             │
+│  ? Search or select session: fts5                                      │
+│  Found 3 matches across 42 sessions in 3.4ms                           │
+│  [1] Today 18:24  Investigate FTS5 full-text recall benchmark (Active) │
+│  Press [1] to resume immediately...                                    │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 Use **`sessionList`** across two environments:
 1. **Terminal Interface**:
