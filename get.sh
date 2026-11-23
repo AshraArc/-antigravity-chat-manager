@@ -2,7 +2,7 @@
 # sessionList 1-Line Remote Installer
 set -e
 
-PRIMARY_REPO="https://github.com/AshraArc/sessionList.git"
+PRIMARY_REPO="https://github.com/AshraArc/ach-cli.git"
 FALLBACK_REPO="https://github.com/AshraArc/-antigravity-chat-manager.git"
 INSTALL_BASE="$HOME/.local/share/sessionlist"
 BIN_DIR="$HOME/.local/bin"

@@ -2,7 +2,7 @@
 
 **Archive Chat History** — unified session manager for Antigravity. Command: `ach`
 
-[![Release](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/AshraArc/-antigravity-chat-manager/releases)
+[![Release](https://img.shields.io/badge/version-2.2.1-blue.svg)](https://github.com/AshraArc/ach-cli/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Engine](https://img.shields.io/badge/search-SQLite%20FTS5-orange.svg)](#features)
 
@@ -26,12 +26,12 @@
 ### 1-Line Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | bash
 ```
 
 Custom binary prefix (e.g. `ag` or `ach` instead of `antig`):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash -s -- ag
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | bash -s -- ag
 ```
 
 This installs:
@@ -43,7 +43,7 @@ This installs:
 To enable conversational session recall inside active Antigravity chats:
 
 ```bash
-agy plugin install https://github.com/AshraArc/-antigravity-chat-manager
+agy plugin install https://github.com/AshraArc/ach-cli
 ```
 
 *Or install locally:* `agy plugin install /path/to/sessionList`
@@ -76,7 +76,7 @@ antig-m
 ```
 
 ```text
-Ach! v2.2.0
+Ach! v2.2.1
 ────────────────────────────────────────────────────────────
 [1] Today 18:24  Investigate FTS5 full-text recall benchmark
 [2] Today 15:10  Build sqlite wal query pipeline & flock mutex
@@ -154,7 +154,7 @@ Runtime storage paths:
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/uninstall.sh | bash
 ```
 
 Or run `./uninstall.sh` from the repository root.

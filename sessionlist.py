@@ -2234,7 +2234,7 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v"):
-            print("Ach! v2.2.0 — Archive Chat History")
+            print("Ach! v2.2.1 — Archive Chat History")
             return
         elif arg in ("--update", "update"):
             install_base = os.path.expanduser("~/.local/share/sessionlist")
@@ -2291,7 +2291,7 @@ def main():
                     print(f"Error checking updates: {e}")
             else:
                 print("To update, run:")
-                print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | sh")
+                print("  curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh")
             return
         elif arg == "--uninstall":
             uninstall_sessionlist()
@@ -2504,7 +2504,7 @@ EXAMPLES
 
     while True:
         clear_screen()
-        print("Ach! v2.2.0")
+        print("Ach! v2.2.1")
         print("─" * 46)
         print("  [1] All Chats")
         print("  [2] Search & Resume")

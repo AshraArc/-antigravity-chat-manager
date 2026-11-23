@@ -11,7 +11,7 @@ class TestSessionListCLI(unittest.TestCase):
         for flag in ["--version", "-v"]:
             proc = subprocess.run([sys.executable, self.script_path, flag], capture_output=True, text=True)
             self.assertEqual(proc.returncode, 0)
-            self.assertIn("v2.2.0", proc.stdout)
+            self.assertIn("v2.2.1", proc.stdout)
 
     def test_help_flags(self):
         for flag in ["--help", "-h"]:
