@@ -1,12 +1,12 @@
 #!/bin/sh
-# sessionList 1-Line Remote Uninstaller
+# Ach! 1-Line Remote Uninstaller
 set -e
 
 INSTALL_BASE="$HOME/.local/share/sessionlist"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_FILE="$HOME/.gemini/antigravity-cli/plugin_data/sessionlist/config.json"
 
-echo "Uninstalling sessionList..."
+echo "Uninstalling Ach!..."
 
 # 1. Remove cloned code
 rm -rf "$INSTALL_BASE"
@@ -45,4 +45,4 @@ if [ -d "$CONFIG_DIR" ]; then
     rm -rf "$CONFIG_DIR"
 fi
 
-echo "✔ Successfully uninstalled sessionList from your system."
+echo "✔ Successfully uninstalled Ach! from your system."

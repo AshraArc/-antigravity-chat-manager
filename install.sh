@@ -12,7 +12,7 @@ command -v python3 >/dev/null 2>&1 || { echo "Error: 'python3' is required but n
 mkdir -p "$INSTALL_DIR"
 
 echo "=================================================="
-echo "          sessionList Unified Installer           "
+echo "                Ach! Installer                "
 echo "=================================================="
 
 DEFAULT_CMD="ach"
@@ -85,7 +85,7 @@ case ":$PATH:" in
 esac
 
 echo "=================================================="
-echo "  ✔ sessionList Installation Complete!"
+echo "  ✔ Ach! installation complete."
 echo "=================================================="
 echo "  1. In Terminal (Outside Chat):"
 echo "     Run:  ${CMD_NAME}-h  (quick list)"

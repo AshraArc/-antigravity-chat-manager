@@ -46,7 +46,7 @@ To enable conversational session recall inside active Antigravity chats:
 agy plugin install https://github.com/AshraArc/ach-cli
 ```
 
-*Or install locally:* `agy plugin install /path/to/sessionList`
+*Or install locally:* `agy plugin install /path/to/ach-cli`
 
 ---
 
@@ -133,7 +133,7 @@ flowchart TD
 ## Directory Structure
 
 ```text
-sessionList/
+ach-cli/
 ├── sessionlist.py              # Core engine: SQLite FTS5 index, TUI, flock locking
 ├── install.sh                  # Installer script
 ├── plugin.json                 # Antigravity plugin manifest
