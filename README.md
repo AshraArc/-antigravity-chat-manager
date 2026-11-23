@@ -136,7 +136,7 @@ antig-m
 
 ```text
 ==========================================
-               sessionList                
+          Chrono ⚡ Antigravity           
 ==========================================
   [1] All Chats
   [2] Search & Resume

@@ -2245,7 +2245,7 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v"):
-            print("sessionList v2.2.0 (by AshraArc)")
+            print("Chrono (sessionList) v2.2.0 ⚡ Antigravity Session Recall (by AshraArc)")
             return
         elif arg in ("--update", "update"):
             install_base = os.path.expanduser("~/.local/share/sessionlist")
@@ -2308,9 +2308,9 @@ def main():
             uninstall_sessionlist()
             return
         elif arg in ("--help", "-h"):
-            print("""sessionList v2.2.0 — Unified Antigravity Session Manager
+            print("""Chrono v2.2.0 ⚡ Antigravity Instant Session Recall & FTS5 Search
 Usage:
-  ach [options]             Session manager CLI
+  ach [options]             Session recall CLI
   <cmd>-h [options]         Quick non-interactive table dump
   <cmd>-m                   Interactive dashboard menu
 
@@ -2499,7 +2499,7 @@ Options:
     while True:
         clear_screen()
         print("==========================================")
-        print("               sessionList                ")
+        print("          Chrono ⚡ Antigravity           ")
         print("==========================================")
         print("  [1] All Chats")
         print("  [2] Search & Resume")
