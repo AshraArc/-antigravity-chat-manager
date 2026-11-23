@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-sessionList (v2.1 Plain-Text Master Log Architecture)
+sessionList (v2.2 SQLite WAL + FTS5 & Multi-Workspace Architecture)
 High-efficiency, zero-overhead session history manager for Google Antigravity CLI.
-Uses line-delimited TSV master_history.tsv for sub-millisecond atomic append and read.
+Uses SQLite WAL mode with FTS5 full-text indexing, multi-workspace directory discovery,
+hardened locking, and backward-compatible TSV master mirroring.
 Guaranteed fit for 80-column terminal displays.
 """
 
@@ -208,7 +209,7 @@ def scan_project_workspaces(root=None):
     # 1. Active git repositories under projects/ (depth <= 4)
     for dirpath, dirnames, filenames in os.walk(projects_dir):
         dirnames[:] = [d for d in dirnames if d not in ignore and not d.startswith(".")]
-        if ".git" in os.listdir(dirpath):
+        if os.path.isdir(os.path.join(dirpath, ".git")):
             candidates.append(dirpath)
             seen.add(dirpath)
 
@@ -416,13 +417,18 @@ def get_db_connection(db_path=None, read_only=False):
     """
     path = db_path if db_path else HISTORY_DB
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    # Establish connection with 5-second busy timeout to handle concurrent readers/writers
     conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     try:
+        # WAL (Write-Ahead-Logging) allows concurrent reads without blocking writers
         conn.execute("PRAGMA journal_mode = WAL;")
+        # NORMAL sync offers durability without fsync latency on every write
         conn.execute("PRAGMA synchronous = NORMAL;")
+        # Retry for up to 5000ms before throwing sqlite3.OperationalError: database is locked
         conn.execute("PRAGMA busy_timeout = 5000;")
         conn.execute("PRAGMA foreign_keys = ON;")
+        # 4MB cache size (-4000 KiB) for fast in-memory query indexing
         conn.execute("PRAGMA cache_size = -4000;")
     except Exception:
         pass
@@ -575,6 +581,8 @@ def migrate_tsv_to_sqlite(db_path=None, tsv_path=None):
                     tsv_records.append((cid, mtime, msgs, group, title))
 
             now = datetime.now()
+            # Pre-extract transcripts before opening the exclusive write transaction
+            to_insert = []
             for cid, mtime, msgs, group, title in tsv_records:
                 if cid not in existing_cids:
                     dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
@@ -582,16 +590,18 @@ def migrate_tsv_to_sqlite(db_path=None, tsv_path=None):
                     rel_label = get_relative_date_label(dt, now)
                     ws = workspaces.get(cid, "")
                     _, _, content = extract_transcript_full_content(cid)
+                    to_insert.append((cid, iso_time, rel_label, title, group, ws, msgs, mtime, content))
 
-                    cur.execute("""
-                        INSERT OR REPLACE INTO sessions 
-                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                    """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
+            for cid, iso_time, rel_label, title, group, ws, msgs, mtime, content in to_insert:
+                cur.execute("""
+                    INSERT OR REPLACE INTO sessions 
+                    (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
 
-                    update_fts_entry(conn, cid, title, group, ws, content)
-                    existing_cids.add(cid)
-                    migrated_count += 1
+                update_fts_entry(conn, cid, title, group, ws, content)
+                existing_cids.add(cid)
+                migrated_count += 1
     except Exception as e:
         print(f"Error during TSV migration: {e}")
     finally:
@@ -700,13 +710,23 @@ def sync_antigravity_summaries_db(conn=None):
 
     return synced_count
 
-def sync_active_sessions_to_db(conn=None):
+# Global throttle timestamp to prevent redundant N+1 disk crawls on every command
+_LAST_BRAIN_SYNC_TS = 0.0
+
+def sync_active_sessions_to_db(conn=None, force=False):
     """
     Scans the local sandbox brain directory for active sessions.
+    Throttled to run at most once every 30 seconds unless force=True.
     Indexes them directly into SQLite history.db.
     """
+    global _LAST_BRAIN_SYNC_TS
+    now_ts = time.time()
+    if not force and (now_ts - _LAST_BRAIN_SYNC_TS < 30.0):
+        return
+
     cand_transcripts = glob.glob(os.path.join(BRAIN_DIR, "*", ".system_generated", "logs", "transcript*.jsonl"))
     if not cand_transcripts:
+        _LAST_BRAIN_SYNC_TS = now_ts
         return
 
     # Filter to most descriptive file per cid (prefer transcript_full.jsonl)
@@ -753,6 +773,7 @@ def sync_active_sessions_to_db(conn=None):
                     """, (cid, iso_time, rel_label, title, group, ws, turns, mtime))
 
                     update_fts_entry(conn, cid, title, group, ws, content)
+        _LAST_BRAIN_SYNC_TS = now_ts
     except Exception:
         pass
     finally:
@@ -838,16 +859,29 @@ def search_sessions_fts(query, db_path=None):
     conn = get_db_connection(path)
     records = []
     try:
-        # Sanitize query for FTS5 syntax
-        clean_q = re.sub(r'[^\w\s\*\-]', ' ', query).strip()
+        # Sanitize query for FTS5 syntax:
+        # 1. Strip characters that cause syntax issues except alphanumeric, spaces, and wildcard
+        clean_q = re.sub(r'[^\w\s\*]', ' ', query).strip()
         if not clean_q:
             return []
 
-        # Construct prefix query tokens
-        tokens = [t + "*" if not t.endswith("*") else t for t in clean_q.split() if t]
-        fts_expr = " ".join(tokens)
+        # 2. Disallow bare FTS boolean operators (AND, OR, NOT, NEAR) to avoid syntax error crashes
+        reserved = {"AND", "OR", "NOT", "NEAR"}
+        terms = []
+        for t in clean_q.split():
+            clean_t = t.rstrip("*")
+            if not clean_t or clean_t.upper() in reserved:
+                continue
+            # Wrap each token in quotes with trailing wildcard for prefix matching (e.g. "term"*)
+            terms.append(f'"{clean_t}"*')
+
+        if not terms:
+            return []
+
+        fts_expr = " ".join(terms)
 
         cur = conn.cursor()
+        # Join FTS virtual table with metadata sessions table; rank by BM25 relevance score
         rows = cur.execute("""
             SELECT s.conversation_id, s.last_modified_time, s.step_count, s.group_name, s.title, s.workspace, s.timestamp, s.relative_time
             FROM sessions_fts f
@@ -955,59 +989,60 @@ def read_master_tsv():
 def write_master_tsv(records):
     """Compatibility helper persisting to both history.db and mirror master_history.tsv."""
     init_db()
-    conn = get_db_connection()
-    try:
-        now = datetime.now()
-        workspaces = load_workspaces()
-        with conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            cur = conn.cursor()
-            for r in records:
-                cid = str(r["id"]).strip()
-                mtime = float(r["mtime"])
-                msgs = int(r["msgs"])
-                group = str(r.get("group", "General")).strip() or "General"
-                title = str(r.get("title", "Untitled Chat")).strip() or "Untitled Chat"
-                ws = str(r.get("workspace", workspaces.get(cid, "")))
-                dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
-                iso_time = dt.isoformat()
-                rel_label = get_relative_date_label(dt, now)
+    with FileLock(LOCK_FILE):
+        conn = get_db_connection()
+        try:
+            now = datetime.now()
+            workspaces = load_workspaces()
+            with conn:
+                conn.execute("BEGIN IMMEDIATE;")
+                cur = conn.cursor()
+                for r in records:
+                    cid = str(r["id"]).strip()
+                    mtime = float(r["mtime"])
+                    msgs = int(r["msgs"])
+                    group = str(r.get("group", "General")).strip() or "General"
+                    title = str(r.get("title", "Untitled Chat")).strip() or "Untitled Chat"
+                    ws = str(r.get("workspace", workspaces.get(cid, "")))
+                    dt = datetime.fromtimestamp(mtime) if mtime > 0 else now
+                    iso_time = dt.isoformat()
+                    rel_label = get_relative_date_label(dt, now)
 
-                cur.execute("""
-                    INSERT OR REPLACE INTO sessions 
-                    (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
-                update_fts_entry(conn, cid, title, group, ws, "")
-    except Exception as e:
-        print(f"Error persisting to SQLite: {e}")
-    finally:
-        conn.close()
+                    cur.execute("""
+                        INSERT OR REPLACE INTO sessions 
+                        (conversation_id, timestamp, relative_time, title, group_name, workspace, step_count, last_modified_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """, (cid, iso_time, rel_label, title, group, ws, msgs, mtime))
+                    update_fts_entry(conn, cid, title, group, ws, "")
+        except Exception as e:
+            print(f"Error persisting to SQLite: {e}")
+        finally:
+            conn.close()
 
-    # Also keep master_history.tsv updated for plain-text mirrors/backwards compat
-    tmp_path = MASTER_TSV + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            for r in records:
-                cid = str(r["id"]).replace("\t", " ").replace("\n", " ").strip()
-                mtime = r["mtime"]
-                msgs = r["msgs"]
-                group = str(r.get("group", "General")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "General"
-                title = str(r.get("title", "Untitled Chat")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "Untitled Chat"
-                f.write(f"{cid}\t{mtime}\t{msgs}\t{group}\t{title}\n")
-        os.replace(tmp_path, MASTER_TSV)
-        mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
-        if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(MASTER_TSV):
-            try:
-                shutil.copy2(MASTER_TSV, os.path.join(mirror_dir, "master_history.tsv"))
-            except Exception:
-                pass
-    except Exception:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+        # Also keep master_history.tsv updated for plain-text mirrors/backwards compat
+        tmp_path = MASTER_TSV + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for r in records:
+                    cid = str(r["id"]).replace("\t", " ").replace("\n", " ").strip()
+                    mtime = r["mtime"]
+                    msgs = r["msgs"]
+                    group = str(r.get("group", "General")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "General"
+                    title = str(r.get("title", "Untitled Chat")).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip() or "Untitled Chat"
+                    f.write(f"{cid}\t{mtime}\t{msgs}\t{group}\t{title}\n")
+            os.replace(tmp_path, MASTER_TSV)
+            mirror_dir = os.path.expanduser("~/.gemini/antigravity-cli/plugin_data/sessionlist")
+            if os.path.exists(mirror_dir) and mirror_dir != os.path.dirname(MASTER_TSV):
+                try:
+                    shutil.copy2(MASTER_TSV, os.path.join(mirror_dir, "master_history.tsv"))
+                except Exception:
+                    pass
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 def parse_transcript_data(fpath):
     first_prompt = ""
@@ -1104,17 +1139,17 @@ def set_chat_title(cid, new_title):
         return
 
     init_db()
-    conn = get_db_connection()
-    try:
-        with conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
-            conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
-    finally:
-        conn.close()
-
-    # Sync to TSV mirror
     with FileLock(LOCK_FILE):
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE;")
+                conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
+                conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (sanitized_title, cid))
+        finally:
+            conn.close()
+
+        # Sync to TSV mirror
         records = read_master_tsv()
         for r in records:
             if r["id"] == cid:
@@ -1150,17 +1185,17 @@ def smart_group(group_name, ids=None, query=None, max_age_seconds=None):
         return
 
     init_db()
-    conn = get_db_connection()
-    try:
-        with conn:
-            conn.execute("BEGIN IMMEDIATE;")
-            for cid in matching_ids:
-                conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
-                conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
-    finally:
-        conn.close()
-
     with FileLock(LOCK_FILE):
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE;")
+                for cid in matching_ids:
+                    conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
+                    conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (sanitized_group, cid))
+        finally:
+            conn.close()
+
         records = read_master_tsv()
         for r in records:
             if r["id"] in matching_ids:
@@ -1468,20 +1503,20 @@ def move_or_rename_chat(chat):
 
     if title_val or group_val:
         init_db()
-        conn = get_db_connection()
-        try:
-            with conn:
-                conn.execute("BEGIN IMMEDIATE;")
-                if title_val:
-                    conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (title_val, cid))
-                    conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (title_val, cid))
-                if group_val:
-                    conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
-                    conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
-        finally:
-            conn.close()
-
         with FileLock(LOCK_FILE):
+            conn = get_db_connection()
+            try:
+                with conn:
+                    conn.execute("BEGIN IMMEDIATE;")
+                    if title_val:
+                        conn.execute("UPDATE sessions SET title = ? WHERE conversation_id = ?;", (title_val, cid))
+                        conn.execute("UPDATE sessions_fts SET title = ? WHERE conversation_id = ?;", (title_val, cid))
+                    if group_val:
+                        conn.execute("UPDATE sessions SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
+                        conn.execute("UPDATE sessions_fts SET group_name = ? WHERE conversation_id = ?;", (group_val, cid))
+            finally:
+                conn.close()
+
             records = read_master_tsv()
             for r in records:
                 if r["id"] == cid:
@@ -1841,7 +1876,14 @@ def do_export_chats(targets):
             clean_slug = "chat"
         time_part = c.get("exact_time", "").replace(":", "") if c.get("exact_time") else "0000"
         md_filename = f"{time_part}_{clean_slug}_{cid[:6]}.md"
-        out_path = os.path.join(export_dir, md_filename)
+        out_path = os.path.abspath(os.path.join(export_dir, md_filename))
+
+        # Security: verify output path does not escape export directory boundary
+        try:
+            if os.path.commonpath([export_dir, out_path]) != export_dir:
+                continue
+        except Exception:
+            continue
 
         md_lines = [
             f"# {c['title']}\n",
@@ -2024,7 +2066,7 @@ def _exec_agy(extra_args):
     try:
         rc = subprocess.call(parts)
     except FileNotFoundError:
-        rc = subprocess.call(" ".join(parts), shell=True)
+        rc = 127
     sys.exit(rc or 0)
 
 def _run_agy(extra_args):
@@ -2033,7 +2075,7 @@ def _run_agy(extra_args):
     try:
         return subprocess.call(parts)
     except FileNotFoundError:
-        return subprocess.call(" ".join(parts), shell=True)
+        return 127
 
 def _brain_ids():
     try:
@@ -2110,8 +2152,11 @@ def all_chats_view():
                     current_ws=curr_ws
                 )
                 if chosen_ws:
-                    count, final_ws = transplant_conversations([target["id"]], chosen_ws)
-                    print(f"\n✔ Successfully moved chat #{part} to:\n  {final_ws}")
+                    try:
+                        count, final_ws = transplant_conversations([target["id"]], chosen_ws)
+                        print(f"\n✔ Successfully moved chat #{part} to:\n  {final_ws}")
+                    except Exception as e:
+                        print(f"\n❌ Error moving chat: {e}")
                     time.sleep(1.0)
         elif cmd.lower().startswith("e "):
             part = cmd[2:].strip()
@@ -2189,23 +2234,70 @@ def list_groups_cli(interactive=False):
             )
             if chosen_ws:
                 g_cids = [c["id"] for c in clist]
-                count, final_ws = transplant_conversations(g_cids, chosen_ws)
-                print(f"\n✔ Successfully moved {count} chat(s) in group '{gname}' to:\n  {final_ws}")
+                try:
+                    count, final_ws = transplant_conversations(g_cids, chosen_ws)
+                    print(f"\n✔ Successfully moved {count} chat(s) in group '{gname}' to:\n  {final_ws}")
+                except Exception as e:
+                    print(f"\n❌ Error moving group: {e}")
                 time.sleep(1.2)
 
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v"):
-            print("sessionList v2.1.0 (by AshraArc)")
+            print("sessionList v2.2.0 (by AshraArc)")
             return
         elif arg in ("--update", "update"):
             install_base = os.path.expanduser("~/.local/share/sessionlist")
+            bin_dir = os.path.expanduser("~/.local/bin")
             if os.path.exists(os.path.join(install_base, ".git")):
                 print("Checking for updates...")
                 try:
-                    res = subprocess.run(["git", "-C", install_base, "pull"], capture_output=True, text=True)
-                    print(res.stdout.strip() if res.stdout else "✔ sessionList is already up to date.")
+                    # Fetch and fast-forward cleanly
+                    res = subprocess.run(["git", "-C", install_base, "pull", "--ff-only"], capture_output=True, text=True)
+                    if res.returncode != 0:
+                        print(f"❌ Update failed:\n{res.stderr.strip() or res.stdout.strip()}")
+                        return
+                    print(res.stdout.strip() if res.stdout.strip() else "✔ sessionList is already up to date.")
+
+                    # 1. Housekeeping: prune obsolete pycache, temp files, and old backups in install base
+                    for root, dirs, files in os.walk(install_base, onerror=lambda _: None):
+                        for f in files:
+                            if f.endswith(".tmp") or f.endswith(".pyc"):
+                                try: os.remove(os.path.join(root, f))
+                                except OSError: pass
+                        for d in list(dirs):
+                            if d == "__pycache__":
+                                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+
+                    # 2. Re-sync launcher binary wrappers in ~/.local/bin/
+                    cfg_alias = detect_cli_command()
+                    if cfg_alias and os.path.isdir(bin_dir):
+                        script_target = os.path.join(install_base, "sessionlist.py")
+                        h_path = os.path.join(bin_dir, f"{cfg_alias}-h")
+                        m_path = os.path.join(bin_dir, f"{cfg_alias}-m")
+                        base_path = os.path.join(bin_dir, cfg_alias)
+                        try:
+                            with open(h_path, "w", encoding="utf-8") as f:
+                                f.write(f'#!/bin/sh\nif [ "$#" -eq 0 ]; then\n    exec python3 "{script_target}" --list\nelse\n    exec python3 "{script_target}" "$@"\nfi\n')
+                            with open(m_path, "w", encoding="utf-8") as f:
+                                f.write(f'#!/bin/sh\nexec python3 "{script_target}" "$@"\n')
+                            os.chmod(h_path, 0o755)
+                            os.chmod(m_path, 0o755)
+                            if os.path.islink(base_path) or not os.path.exists(base_path):
+                                try: os.remove(base_path)
+                                except OSError: pass
+                                os.symlink(m_path, base_path)
+                        except Exception:
+                            pass
+
+                    # 3. Prune legacy unused alias symlinks from bin_dir
+                    for stale in ("antig", "antig-h", "antig-m", "ag", "ag-h", "ag-m"):
+                        if stale != cfg_alias and not stale.startswith(f"{cfg_alias}-"):
+                            sp = os.path.join(bin_dir, stale)
+                            if os.path.islink(sp):
+                                try: os.remove(sp)
+                                except OSError: pass
                 except Exception as e:
                     print(f"Error checking updates: {e}")
             else:
@@ -2216,7 +2308,7 @@ def main():
             uninstall_sessionlist()
             return
         elif arg in ("--help", "-h"):
-            print("""sessionList v2.1.0 — Unified Antigravity Session Manager
+            print("""sessionList v2.2.0 — Unified Antigravity Session Manager
 Usage:
   ach [options]             Session manager CLI
   <cmd>-h [options]         Quick non-interactive table dump

@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="google-site-verification" content="google04c5556c23e66695" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>sessionList - Power-User Companion for Google Antigravity</title>
+  <title>sessionList - Chat & History Manager for Google Antigravity</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -123,7 +122,7 @@
     .badge-star svg { width: 14px; height: 14px; fill: currentColor; }
 
     h1 {
-      font-size: 3.1rem;
+      font-size: 3.2rem;
       font-weight: 800;
       color: var(--text-bright);
       letter-spacing: -0.035em;
@@ -131,9 +130,9 @@
       line-height: 1.2;
     }
     .subtitle {
-      font-size: 1.2rem;
+      font-size: 1.25rem;
       color: var(--text-muted);
-      max-width: 820px;
+      max-width: 720px;
       margin: 0 auto 36px;
       line-height: 1.5;
     }
@@ -222,7 +221,7 @@
     .terminal-body {
       padding: 24px 28px;
       font-family: 'Fira Code', monospace;
-      font-size: 0.90rem;
+      font-size: 0.92rem;
       color: #e6edf3;
       line-height: 1.7;
       overflow-x: auto;
@@ -294,46 +293,6 @@
       font-size: 0.85rem;
     }
 
-    /* Comparison Section */
-    .positioning-section {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 32px;
-      margin-bottom: 80px;
-    }
-    .positioning-section h3 {
-      font-size: 1.4rem;
-      color: var(--text-bright);
-      margin-bottom: 16px;
-    }
-    .positioning-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      margin-top: 16px;
-    }
-    .positioning-col {
-      background: #0d1219;
-      border: 1px solid #1f2733;
-      border-radius: 8px;
-      padding: 20px;
-    }
-    .positioning-col h4 {
-      font-size: 1.05rem;
-      color: var(--accent);
-      margin-bottom: 10px;
-    }
-    .positioning-col ul {
-      list-style-type: disc;
-      padding-left: 20px;
-      color: var(--text-muted);
-      font-size: 0.92rem;
-    }
-    .positioning-col ul li {
-      margin-bottom: 8px;
-    }
-
     /* Footer */
     footer {
       text-align: center;
@@ -351,7 +310,6 @@
       .copy-btn { margin-left: 0; width: 100%; }
       .terminal-body { font-size: 0.8rem; padding: 18px; }
       .features-grid { grid-template-columns: 1fr; }
-      .positioning-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -376,18 +334,18 @@
       <div class="hero-badges">
         <span class="badge">Open Source v2.2.0</span>
         <a href="https://github.com/AshraArc/-antigravity-chat-manager" target="_blank" class="badge badge-star">
-          <svg viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.751.751 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+          <svg viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
           AshraArc / -antigravity-chat-manager
         </a>
       </div>
-      <h1>FTS5 Search, Multi-Layer Purge<br>&amp; Markdown Export</h1>
-      <p class="subtitle">The power-user companion CLI for Google Antigravity (<code>agy</code>). Perform deep full-text searches across conversation messages and code blocks, cleanly purge chats from all storage layers, and export notes directly from the terminal.</p>
+      <h1>The Missing Session Manager<br>for Google Antigravity</h1>
+      <p class="subtitle">Fast interactive dashboard, sub-millisecond search, batch deletions, and clean Markdown exports for power developers using <code>agy</code>.</p>
       
       <!-- Installation Command Box -->
       <div class="install-box">
         <div class="install-cmd-wrap">
           <span class="shell-prompt">$</span>
-          <span class="install-cmd" id="installCmd">curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | sh</span>
+          <span class="install-cmd" id="installCmd">curl -fsSL https://raw.githubusercontent.com/AshraArc/-antigravity-chat-manager/main/get.sh | bash</span>
         </div>
         <button class="copy-btn" onclick="copyInstall()">Copy Command</button>
       </div>
@@ -402,101 +360,47 @@
         <span class="terminal-title">ashwath@antigravity: ~ (ach)</span>
       </div>
       <div class="terminal-body"><span class="t-blue">=== Antigravity Chat Manager (sessionList v2.2.0) ===</span>
-<span class="t-gray">SQLite WAL Engine • FTS5 Full-Text Search Active • 12 Indexed Sessions</span>
+<span class="t-gray">Detected 12 active sessions across project workspaces</span>
 
   <span class="t-cyan">[1]</span>  <span class="t-yellow">Today 22:30</span>   Implement CI/CD multi-OS automated testing pipeline
   <span class="t-cyan">[2]</span>  <span class="t-yellow">Today 21:15</span>   Build interactive terminal UI and batch cleanup
-  <span class="t-cyan">[3]</span>  <span class="t-yellow">Yesterday</span>     Add SQLite WAL backup & index repair engine
+  <span class="t-cyan">[3]</span>  <span class="t-yellow">Yesterday</span>     Add multi-platform backup & index repair engine
   <span class="t-cyan">[4]</span>  <span class="t-yellow">Nov 18</span>        Investigate session transcript performance
 
-<span class="t-green">Commands:</span> &lt;num&gt; resume | <span class="t-yellow">x &lt;num&gt;</span> export MD | <span class="t-yellow">x all</span> | <span class="t-yellow">d &lt;n1,n2..&gt;</span> purge | <span class="t-yellow">n</span> new | <span class="t-yellow">e &lt;num&gt;</span> edit
-<span class="t-blue">Select &gt;</span> _</div>
-    </div>
-
-    <!-- Honest Positioning Comparison Section -->
-    <div class="positioning-section">
-      <h3>The Honest Difference: Antigravity Built-in vs. sessionList</h3>
-      <p style="color: var(--text-muted); font-size: 0.95rem;">Antigravity already includes a fast picker (<code>/resume</code>) inside active chats. sessionList doesn't duplicate basic operations—it serves as the dedicated power-user companion for terminal automations and deep management.</p>
-      <div class="positioning-grid">
-        <div class="positioning-col">
-          <h4>Google Antigravity Built-in (/resume)</h4>
-          <ul>
-            <li>In-chat fuzzy picker for titles</li>
-            <li>Single conversation deletion</li>
-            <li>In-chat conversation renaming</li>
-            <li>Single conversation resume</li>
-          </ul>
-        </div>
-        <div class="positioning-col">
-          <h4>sessionList Power-User Companion</h4>
-          <ul>
-            <li><strong>FTS5 Full-Text Search:</strong> Searches inside conversation messages and code blocks</li>
-            <li><strong>Multi-Layer Batch Purge:</strong> Wipes chats from transcript dirs, <code>conversations/*.db</code>, and central <code>conversation_summaries.db</code> permanently</li>
-            <li><strong>Markdown Note Export:</strong> Direct <code>x &lt;num&gt;</code>, <code>x all</code>, and <code>--export</code> for docs & wikis</li>
-            <li><strong>Sequential Folder Selector:</strong> Pick CWD, root, or recent projects on <code>[n]</code></li>
-            <li><strong>Plain Terminal CLI:</strong> Run without starting an interactive <code>agy</code> session</li>
-          </ul>
-        </div>
-      </div>
+<span class="t-green">Commands:</span> [1-4] Resume | [s] Search | [d 1,2] Batch Delete | [e] Export MD | [q] Quit
+<span class="t-blue">Select option:</span> _</div>
     </div>
 
     <!-- Feature Grid with Glow -->
-    
-    <!-- Antigravity Deep Integration Section -->
-    <section class="features-section" style="margin-top: -20px; margin-bottom: 60px;">
-      <div class="features-header">
-        <h2>Native Antigravity Integration</h2>
-        <p>Built to cooperate directly with Antigravity's internal architecture, not fight it.</p>
-      </div>
-      <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
-        <div class="feature-card">
-          <h3>🔗 Direct SQLite Sync</h3>
-          <p>Directly queries Antigravity's central <code>conversation_summaries.db</code>. Every chat started in <code>agy</code> is indexed automatically in real time.</p>
-        </div>
-        <div class="feature-card">
-          <h3>🧹 Multi-Layer Purge</h3>
-          <p>Batch deleting in <code>sessionList</code> executes clean SQL deletes across Antigravity's summary &amp; FTS tables. Deleted chats disappear from <code>/resume</code> permanently.</p>
-        </div>
-        <div class="feature-card">
-          <h3>📁 Workspace-Aware Resume</h3>
-          <p>Remembers the original folder where each session started, switching into it before resuming so <code>agy</code> never triggers untrusted folder security prompts.</p>
-        </div>
-        <div class="feature-card">
-          <h3>⚡ Standalone UNIX Pipeline</h3>
-          <p>Run quick queries directly from your shell (<code>ach -l</code>, <code>ach -s</code>, <code>ach -x</code>) without having to launch or wait for the agent LLM runtime.</p>
-        </div>
-      </div>
-    </section>
-
     <section class="features-section">
       <div class="features-header">
-        <h2>Engineered for Power Users</h2>
-        <p>Reliable SQLite storage, deep search indexing, and total clean-up controls.</p>
+        <h2>Built for Speed & Developer Control</h2>
+        <p>Everything the native CLI transcript dump was missing.</p>
       </div>
       <div class="features-grid">
         <div class="feature-card">
-          <h3>🔍 SQLite WAL + FTS5 Search</h3>
-          <p>Powered by SQLite WAL mode and FTS5 virtual tables. Search deeply through message transcripts, terminal commands, and code blocks—not just titles—from the TUI or <code>--search-cli</code>.</p>
+          <h3>⚡ Instant Sub-Millisecond Speed</h3>
+          <p>Powered by a lean plain-text TSV master index. Search through hundreds of chat sessions in under a millisecond with zero database overhead.</p>
         </div>
         <div class="feature-card">
-          <h3>🧹 Complete Multi-Layer Purge</h3>
-          <p>Batch delete sessions with <code>d 1,3,4</code> or <code>--delete 1,3,4</code>. Purges transcript folders, SQLite databases, and Antigravity's central <code>conversation_summaries.db</code> so chats vanish from <code>/resume</code> forever.</p>
+          <h3>🔍 1-Key Interactive Resume</h3>
+          <p>Say goodbye to copying 36-character UUIDs. Simply press <code>1</code>, <code>2</code>, or use <code>s</code> to jump right back into any session with <code>agy</code>.</p>
         </div>
         <div class="feature-card">
-          <h3>📄 Top-Level Markdown Export</h3>
-          <p>Export any chat with <code>x &lt;num&gt;</code> or all conversations with <code>x all</code> (or CLI flag <code>--export</code>) directly from the top-level table into human-readable Markdown notes.</p>
+          <h3>🗑️ Batch Cleanup & Pruning</h3>
+          <p>Clean out dead or abandoned chats in bulk with <code>d 1,3,4</code>. Frees up workspace storage and cleans index entries safely with confirmation.</p>
         </div>
         <div class="feature-card">
-          <h3>📂 Sequential Folder Selector</h3>
-          <p>Press <code>[n]</code> to launch a new chat with an intuitive numbered folder picker: <code>[1]</code> CWD, <code>[2]</code> Antigravity Root, recent project workspaces, or <code>[c]</code> custom path.</p>
+          <h3>📄 Clean Markdown Export</h3>
+          <p>Convert messy JSONL transcript payloads into readable, formatted Markdown ready for notes, team documentation, or PR summaries.</p>
         </div>
         <div class="feature-card">
-          <h3>⌨️ Non-Interactive CLI Flags</h3>
-          <p>Integrate sessionList into shell workflows using <code>ach-h</code> with <code>--search-cli</code>, <code>--export</code>, <code>--delete</code>, <code>--days</code>, and <code>--all</code> without entering interactive menus.</p>
+          <h3>🛡️ Complete CLI Standards</h3>
+          <p>Includes standard lifecycle flags: <code>--help</code>, <code>--version</code>, <code>--update</code>, and <code>--uninstall</code> right out of the box.</p>
         </div>
         <div class="feature-card">
-          <h3>🛡️ Workspace-Aware Resume</h3>
-          <p>Automatically resolves and switches into the original project directory before resuming so <code>agy</code> never halts to ask for untrusted workspace permissions.</p>
+          <h3>🔄 Self-Healing Recovery</h3>
+          <p>Built-in log repair scans for unindexed sessions and restores damaged or corrupted indexes in seconds without losing transcripts.</p>
         </div>
       </div>
     </section>
