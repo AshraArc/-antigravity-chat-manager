@@ -407,10 +407,6 @@ def get_relative_date_label(dt, now):
 # SQLITE ENGINE & FULL-TEXT SEARCH (FTS5)
 # ==========================================
 
-def get_history_db_path(data_dir=None):
-    base = data_dir if data_dir else DATA_DIR
-    return os.path.join(base, "history.db")
-
 def get_db_connection(db_path=None, read_only=False):
     """
     Connects to SQLite database with Antigravity connection standards:
@@ -862,30 +858,6 @@ def search_sessions_fts(query, db_path=None):
 
     return records
 
-def parse_transcript_data(fpath):
-    first_prompt = ""
-    user_turns = 0
-    try:
-        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    if entry.get("type") == "USER_INPUT":
-                        cleaned = clean_text(entry.get("content", ""))
-                        if cleaned:
-                            user_turns += 1
-                            if not first_prompt:
-                                first_prompt = cleaned
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    if not first_prompt:
-        first_prompt = "(No user input recorded)"
-
-    return first_prompt, user_turns
-
 def get_all_chats():
     init_db()
     sync_antigravity_summaries_db()
@@ -918,7 +890,6 @@ def render_terminal_table(chats, limit=None):
     print(f"{'#':<3} {'Period':<10} {'Time':<6} {'Group':<10} {'Msgs':<5} {'Title':<36}")
     print("-" * 76)
 
-    current_period = None
     for idx, c in enumerate(displayed, 1):
         period = c["time_label"]
         time_str = c["exact_time"]
@@ -935,8 +906,6 @@ def render_terminal_table(chats, limit=None):
     if limit is not None and len(chats) > limit:
         print(f"Showing {limit} of {len(chats)} sessions. To see all, run with --all.")
 
-# ==========================================
-# MUTATIONS & CLI ACTIONS
 # ==========================================
 # MUTATIONS & CLI ACTIONS
 # ==========================================
@@ -1023,87 +992,222 @@ def get_all_data_dirs():
             unique_dirs.append(norm)
     return unique_dirs
 
-def purge_chats_from_all_storage(cids):
+_VALID_CID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+
+
+def validate_conversation_id(cid):
+    """Return True if cid is a safe, well-formed conversation identifier."""
+    if not isinstance(cid, str) or not cid:
+        return False
+    return bool(_VALID_CID_RE.fullmatch(cid))
+
+
+def get_active_conversation_id():
+    """Return the currently active conversation ID from the environment, if any."""
+    for env_var in ("AGY_CONVERSATION_ID", "ANTIGRAVITY_CONVERSATION_ID", "CONVERSATION_ID"):
+        val = os.environ.get(env_var, "").strip()
+        if val and validate_conversation_id(val):
+            return val
+    return None
+
+
+def _is_strictly_within(target_path, base_dir):
+    """Return True iff realpath(target_path) is strictly inside realpath(base_dir)."""
+    try:
+        real_base = os.path.realpath(base_dir)
+        real_target = os.path.realpath(target_path)
+        return os.path.commonpath([real_base, real_target]) == real_base and real_target != real_base
+    except (ValueError, OSError):
+        return False
+
+
+def _is_parent_within(target_path, base_dir):
+    """Return True iff realpath(dirname(target_path)) is within or equal to realpath(base_dir)."""
+    try:
+        real_base = os.path.realpath(base_dir)
+        real_parent = os.path.realpath(os.path.dirname(os.path.abspath(target_path)))
+        return os.path.commonpath([real_base, real_parent]) == real_base
+    except (ValueError, OSError):
+        return False
+
+
+def _safe_remove_file(path, base_dir, warnings):
+    """Safely and idempotently remove a file or symlink contained within base_dir."""
+    if not os.path.lexists(path):
+        return False
+    if os.path.islink(path):
+        if not _is_parent_within(path, base_dir):
+            warnings.append(f"Refused to unlink symlink outside target directory: {path}")
+            return False
+        try:
+            os.unlink(path)
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError as exc:
+            warnings.append(f"Failed to unlink {path}: {exc}")
+            return False
+
+    if not _is_strictly_within(path, base_dir):
+        warnings.append(f"Refused to remove file outside target directory: {path}")
+        return False
+    try:
+        os.remove(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        warnings.append(f"Failed to remove {path}: {exc}")
+        return False
+
+
+def _safe_remove_tree(path, base_dir, warnings):
+    """Safely and idempotently remove a directory tree (or symlink) contained within base_dir."""
+    if not os.path.lexists(path):
+        return False
+    if os.path.islink(path):
+        return _safe_remove_file(path, base_dir, warnings)
+    if not _is_strictly_within(path, base_dir):
+        warnings.append(f"Refused to remove directory outside target directory: {path}")
+        return False
+    if not os.path.isdir(path):
+        return _safe_remove_file(path, base_dir, warnings)
+
+    tree_errors = []
+
+    def _on_error(_func, err_path, exc_info):
+        exc = exc_info[1] if isinstance(exc_info, tuple) else exc_info
+        if isinstance(exc, FileNotFoundError):
+            return
+        tree_errors.append(f"Failed to remove {err_path}: {exc}")
+
+    try:
+        shutil.rmtree(path, onerror=_on_error)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        tree_errors.append(f"Failed to remove {path}: {exc}")
+
+    warnings.extend(tree_errors)
+    return not tree_errors
+
+
+def purge_chats_from_all_storage(cids, *, agy_cli_dir=None, brain_dir=None, force=False, return_report=False):
     """
-    Completely and thoroughly purges sessions across all Antigravity CLI storage layers:
-    1. Brain directory: ~/.gemini/antigravity-cli/brain/<cid>/
-    2. Conversations SQLite db: ~/.gemini/antigravity-cli/conversations/<cid>.db*
+    Completely and safely purges sessions across all Antigravity CLI storage layers:
+    1. Brain directory: <brain_dir>/<cid>/
+    2. Conversations files: <agy_cli_dir>/conversations/<cid>.*
     3. Central index conversation_summaries.db:
        - conversation_summaries
        - conversations_fts
        - conversation_parents
-    4. Annotations: ~/.gemini/antigravity-cli/annotations/<cid>.pbtxt
+    4. Annotations: <agy_cli_dir>/annotations/<cid>.pbtxt
     5. SQLite history.db and sessions_fts in active and all mirror paths
     6. Workspaces across active and all mirror paths:
        - Purges cids from workspaces.json in all data dirs
     """
+    report = {
+        "purged": [],
+        "skipped": [],
+        "invalid": [],
+        "warnings": [],
+    }
     if not cids:
-        return 0
-    cid_set = set(cids)
+        return report if return_report else 0
+
+    active_cid = None if force else get_active_conversation_id()
+    valid_cids = []
+    seen = set()
+    for cid in cids:
+        if not validate_conversation_id(cid):
+            report["invalid"].append(cid)
+            report["warnings"].append(f"Rejected invalid conversation ID: {cid!r}")
+            continue
+        if cid in seen:
+            continue
+        seen.add(cid)
+        if active_cid and cid == active_cid:
+            report["skipped"].append(cid)
+            report["warnings"].append(f"Skipped active session: {cid}")
+            continue
+        valid_cids.append(cid)
+
+    if not valid_cids:
+        return report if return_report else 0
+
     home = os.path.expanduser("~")
-    agy_cli_dir = os.path.join(home, ".gemini", "antigravity-cli")
+    cli_dir = agy_cli_dir or os.path.join(home, ".gemini", "antigravity-cli")
+    target_brain_dir = brain_dir or BRAIN_DIR
+    conv_dir = os.path.join(cli_dir, "conversations")
+    annot_dir = os.path.join(cli_dir, "annotations")
+    warnings = report["warnings"]
 
-    for cid in cid_set:
+    # Snapshot conversation directory entries once to avoid glob metacharacter issues
+    conv_entries = []
+    if os.path.isdir(conv_dir):
+        try:
+            conv_entries = os.listdir(conv_dir)
+        except OSError as exc:
+            warnings.append(f"Failed to list conversations directory {conv_dir}: {exc}")
+
+    for cid in valid_cids:
         # 1. Brain directory
-        folder = os.path.join(BRAIN_DIR, cid)
-        if os.path.exists(folder):
-            try:
-                shutil.rmtree(folder, ignore_errors=True)
-            except Exception:
-                pass
+        folder = os.path.join(target_brain_dir, cid)
+        _safe_remove_tree(folder, target_brain_dir, warnings)
 
-        # 2. Conversations SQLite db (*.db, *.db-wal, *.db-shm)
-        conv_dir = os.path.join(agy_cli_dir, "conversations")
-        for f in glob.glob(os.path.join(conv_dir, f"{cid}.db*")):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
+        # 2. Conversations artifacts (<cid>.db, <cid>.db-wal, <cid>.db-shm, <cid>.pb, etc.)
+        prefix = f"{cid}."
+        for entry in conv_entries:
+            if entry == cid or entry.startswith(prefix):
+                _safe_remove_file(os.path.join(conv_dir, entry), conv_dir, warnings)
 
         # 4. Annotations
-        annot_path = os.path.join(agy_cli_dir, "annotations", f"{cid}.pbtxt")
-        if os.path.exists(annot_path):
-            try:
-                os.remove(annot_path)
-            except Exception:
-                pass
+        annot_path = os.path.join(annot_dir, f"{cid}.pbtxt")
+        _safe_remove_file(annot_path, annot_dir, warnings)
 
     # 3. Central index conversation_summaries.db
-    sum_db = os.path.join(agy_cli_dir, "conversation_summaries.db")
+    sum_db = os.path.join(cli_dir, "conversation_summaries.db")
     if os.path.exists(sum_db):
+        conn = None
         try:
             conn = sqlite3.connect(sum_db, timeout=5.0)
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
             tables = {row[0] for row in cur.fetchall()}
 
-            for cid in cid_set:
+            for cid in valid_cids:
                 if "conversation_summaries" in tables:
                     try:
                         cur.execute("DELETE FROM conversation_summaries WHERE conversation_id = ?;", (cid,))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        warnings.append(f"Failed to delete {cid} from conversation_summaries: {exc}")
                 if "conversations_fts" in tables:
                     try:
                         cur.execute("DELETE FROM conversations_fts WHERE conversation_id = ?;", (cid,))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        warnings.append(f"Failed to delete {cid} from conversations_fts: {exc}")
                 if "conversation_parents" in tables:
                     try:
                         cur.execute("DELETE FROM conversation_parents WHERE conversation_id = ? OR parent_id = ?;", (cid, cid))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        warnings.append(f"Failed to delete {cid} from conversation_parents: {exc}")
 
             conn.commit()
-            conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.append(f"Failed to update {sum_db}: {exc}")
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # 5. SQLite history.db and sessions_fts across active and all mirror data paths
     all_dirs = get_all_data_dirs()
     for d in all_dirs:
         db_file = os.path.join(d, "history.db")
         if os.path.exists(db_file):
+            conn_h = None
             try:
                 conn_h = get_db_connection(db_file)
                 with conn_h:
@@ -1111,14 +1215,19 @@ def purge_chats_from_all_storage(cids):
                     cur_h = conn_h.cursor()
                     cur_h.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
                     t_names = {row[0] for row in cur_h.fetchall()}
-                    for cid in cid_set:
+                    for cid in valid_cids:
                         if "sessions" in t_names:
                             cur_h.execute("DELETE FROM sessions WHERE conversation_id = ?;", (cid,))
                         if "sessions_fts" in t_names:
                             cur_h.execute("DELETE FROM sessions_fts WHERE conversation_id = ?;", (cid,))
-                conn_h.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.append(f"Failed to update {db_file}: {exc}")
+            finally:
+                if conn_h is not None:
+                    try:
+                        conn_h.close()
+                    except Exception:
+                        pass
 
         # Clean workspaces.json
         ws_path = os.path.join(d, "workspaces.json")
@@ -1128,7 +1237,7 @@ def purge_chats_from_all_storage(cids):
                     ws_data = json.load(f)
                 if isinstance(ws_data, dict):
                     modified = False
-                    for cid in cid_set:
+                    for cid in valid_cids:
                         if cid in ws_data:
                             del ws_data[cid]
                             modified = True
@@ -1137,10 +1246,11 @@ def purge_chats_from_all_storage(cids):
                         with open(tmp_ws, "w", encoding="utf-8") as f:
                             json.dump(ws_data, f, indent=1)
                         os.replace(tmp_ws, ws_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.append(f"Failed to update {ws_path}: {exc}")
 
-    return len(cid_set)
+    report["purged"] = valid_cids
+    return report if return_report else len(valid_cids)
 
 def delete_chats_multi(chats_to_delete):
     if not chats_to_delete:
@@ -1153,12 +1263,11 @@ def delete_chats_multi(chats_to_delete):
     if confirm == "y":
         del_ids = [c["id"] for c in chats_to_delete]
         with FileLock(LOCK_FILE):
-            purge_chats_from_all_storage(del_ids)
-        print(f"\n✔ Deleted {len(chats_to_delete)} chat(s). Refreshing...")
+            report = purge_chats_from_all_storage(del_ids, return_report=True)
+        for w in report["warnings"]:
+            print(f"Warning: {w}", file=sys.stderr)
+        print(f"\n✔ Deleted {len(report['purged'])} chat(s). Refreshing...")
         time.sleep(0.5)
-
-def delete_single_chat(chat):
-    delete_chats_multi([chat])
 
 def detect_cli_command():
     """
@@ -1630,7 +1739,6 @@ def do_export_chats(targets):
                         try:
                             entry = json.loads(line)
                             t = entry.get("type")
-                            src = entry.get("source")
                             content = entry.get("content", "")
                             cleaned = clean_text(content)
 
@@ -1797,20 +1905,6 @@ def _exec_agy(extra_args):
     except FileNotFoundError:
         rc = 127
     sys.exit(rc or 0)
-
-def _run_agy(extra_args):
-    cli_cmd = detect_cli_command()
-    parts = cli_cmd.split() + extra_args
-    try:
-        return subprocess.call(parts)
-    except FileNotFoundError:
-        return 127
-
-def _brain_ids():
-    try:
-        return {d for d in os.listdir(BRAIN_DIR) if os.path.isdir(os.path.join(BRAIN_DIR, d))}
-    except Exception:
-        return set()
 
 def start_new_chat():
     chosen_ws = select_new_chat_workspace()
@@ -2194,8 +2288,10 @@ EXAMPLES
             if selected:
                 del_ids = [c["id"] for c in selected]
                 with FileLock(LOCK_FILE):
-                    purge_chats_from_all_storage(del_ids)
-                print(f"✔ Deleted {len(selected)} chat(s).")
+                    report = purge_chats_from_all_storage(del_ids, return_report=True)
+                for w in report["warnings"]:
+                    print(f"Warning: {w}", file=sys.stderr)
+                print(f"✔ Deleted {len(report['purged'])} chat(s).")
             else:
                 print(f"No chats matched '{' '.join(raw_args)}'.")
             return
