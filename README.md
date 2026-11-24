@@ -24,19 +24,33 @@
 
 ## Installation
 
-### 1-Line Quick Install
+### macOS / Linux / BSD (POSIX `sh`, no `bash` required)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | bash
+```sh
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh
 ```
 
 Custom binary prefix (e.g., `ag` instead of `ach`):
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | bash -s -- ag
+```sh
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh -s -- ag
 ```
 
-By default, `get.sh` and `install.sh` install three launchers into `~/.local/bin/`:
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.ps1 | iex
+```
+
+### Universal Python (`uv` / `pipx`)
+
+```sh
+uv tool install git+https://github.com/AshraArc/ach-cli.git
+# or
+pipx install git+https://github.com/AshraArc/ach-cli.git
+```
+
+By default, `get.sh`, `install.sh`, and `get.ps1` install three launchers (`~/.local/bin/` on Unix, `%LOCALAPPDATA%\ach\bin` on Windows):
 - `ach`: Unified entry point (launches interactive TUI with no args, or runs headless CLI flags).
 - `ach-h`: Fast non-interactive table dump (`--list` default, `< 90ms`).
 - `ach-m`: Direct interactive terminal management dashboard.
@@ -221,9 +235,11 @@ Inside any active Antigravity chat, trigger session history with slash commands 
 ```text
 ach-cli/
 ├── ach.py                      # Core engine: SQLite WAL/FTS5 index, TUI, CLI, flock locking
-├── get.sh                      # 1-line remote installer (default prefix: ach)
-├── install.sh                  # Local installer (installs ach, ach-h, ach-m)
-├── uninstall.sh                # Uninstaller script
+├── get.sh                      # POSIX sh 1-line remote installer (macOS/Linux/BSD)
+├── get.ps1                     # Windows PowerShell 1-line remote installer
+├── install.sh / install.ps1    # Local installers (installs ach, ach-h, ach-m)
+├── uninstall.sh / uninstall.ps1# Uninstaller scripts (Unix & Windows)
+├── pyproject.toml              # Universal Python packaging (uv / pipx)
 ├── plugin.json                 # Antigravity plugin manifest
 ├── README.md                   # Documentation & usage reference
 ├── v2.2.1.md                   # v2.2.1 release notes
@@ -242,11 +258,17 @@ Runtime storage paths:
 
 ## Uninstall
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/uninstall.sh | bash
+**macOS / Linux / BSD:**
+```sh
+curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/uninstall.sh | sh
 ```
 
-Or run `ach --uninstall` / `./uninstall.sh` from the repository root.
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/AshraArc/ach-cli/main/uninstall.ps1 | iex
+```
+
+Or run `ach --uninstall`, `./uninstall.sh`, or `.\uninstall.ps1` from the repository root.
 
 ---
 

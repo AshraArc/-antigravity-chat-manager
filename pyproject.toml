@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ach-cli"
+version = "2.2.1"
+description = "Ach! (Archive Chat History) — High-efficiency SQLite WAL + FTS5 session history manager for Google Antigravity CLI"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "AshraArc" }]
+keywords = ["antigravity", "cli", "chat-history", "sqlite", "fts5"]
+dependencies = []
+
+[project.scripts]
+ach = "ach:main"
+
+[tool.setuptools]
+py-modules = ["ach"]

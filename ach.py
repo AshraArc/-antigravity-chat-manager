@@ -1331,8 +1331,15 @@ def get_prompt_input(prompt_text):
         except (EOFError, KeyboardInterrupt):
             return "esc"
 
-    import termios
-    import tty
+    try:
+        import termios
+        import tty
+    except ImportError:
+        # Windows / platforms without termios fall back to standard input()
+        try:
+            return input(prompt_text).strip()
+        except (EOFError, KeyboardInterrupt):
+            return "esc"
 
     sys.stdout.write(prompt_text)
     sys.stdout.flush()

@@ -161,12 +161,42 @@
     }
 
     /* Quick Install Bar */
+    .install-box {
+      max-width: 680px;
+      margin: 0 auto;
+    }
+    .install-tabs {
+      display: inline-flex;
+      gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      padding: 4px;
+    }
+    .install-tab {
+      font-family: var(--font-sans);
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      padding: 5px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .install-tab:hover {
+      color: #fff;
+    }
+    .install-tab.active {
+      color: #fff;
+      background: var(--surface-raised);
+    }
     .install-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      max-width: 640px;
-      margin: 0 auto;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -423,12 +453,19 @@
       <h1>Archive Chat History — Unified session manager for Antigravity.</h1>
       <p class="lead">Query full conversation histories in milliseconds with SQLite FTS5. One keystroke to resume, batch prune dead sessions, or recall in-chat.</p>
       
-      <div class="install-bar">
-        <div class="install-code">
-          <span class="prompt-char">$</span>
-          <span id="installCmd">curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | bash</span>
+      <div class="install-box">
+        <div class="install-tabs" role="tablist" aria-label="Install method">
+          <button class="install-tab active" role="tab" aria-selected="true" onclick="setInstallTab('unix', this)">macOS / Linux / BSD</button>
+          <button class="install-tab" role="tab" aria-selected="false" onclick="setInstallTab('windows', this)">Windows (PowerShell)</button>
+          <button class="install-tab" role="tab" aria-selected="false" onclick="setInstallTab('python', this)">uv / pipx</button>
         </div>
-        <button class="copy-btn" onclick="copyInstall()">Copy</button>
+        <div class="install-bar">
+          <div class="install-code">
+            <span class="prompt-char" id="installPrompt">$</span>
+            <span id="installCmd">curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh</span>
+          </div>
+          <button class="copy-btn" onclick="copyInstall()">Copy</button>
+        </div>
       </div>
     </header>
 
@@ -537,6 +574,34 @@ ach mv 2 ~/dir       <span class="c-dim"># Move session 2 workspace to ~/dir</sp
   </div>
 
   <script>
+    const INSTALL_CMDS = {
+      unix: {
+        prompt: '$',
+        cmd: 'curl -fsSL https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.sh | sh'
+      },
+      windows: {
+        prompt: '>',
+        cmd: 'irm https://raw.githubusercontent.com/AshraArc/ach-cli/main/get.ps1 | iex'
+      },
+      python: {
+        prompt: '$',
+        cmd: 'uv tool install git+https://github.com/AshraArc/ach-cli.git'
+      }
+    };
+
+    function setInstallTab(key, el) {
+      const entry = INSTALL_CMDS[key];
+      if (!entry) return;
+      document.getElementById('installPrompt').innerText = entry.prompt;
+      document.getElementById('installCmd').innerText = entry.cmd;
+      document.querySelectorAll('.install-tab').forEach(btn => {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
+      });
+      el.classList.add('active');
+      el.setAttribute('aria-selected', 'true');
+    }
+
     function copyInstall() {
       const text = document.getElementById('installCmd').innerText;
       navigator.clipboard.writeText(text).then(() => {

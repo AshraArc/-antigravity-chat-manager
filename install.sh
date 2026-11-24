@@ -17,7 +17,7 @@ echo "=================================================="
 
 DEFAULT_CMD="ach"
 printf "Enter preferred alias/command prefix [default: %s]: " "$DEFAULT_CMD"
-read USER_CMD
+read -r USER_CMD
 CMD_NAME="${USER_CMD:-$DEFAULT_CMD}"
 
 # 1. Generate quick list binary: <cmd>-h

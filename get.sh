@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# Ach! 1-Line Remote Installer
+#!/bin/sh
+# Ach! 1-Line Remote Installer (POSIX sh)
 set -e
 
 PRIMARY_REPO="https://github.com/AshraArc/ach-cli.git"
@@ -33,7 +33,8 @@ DEFAULT_PREFIX="ach"
 if [ -n "$1" ]; then
     CMD_PREFIX="$1"
 elif [ -t 0 ] || [ -e /dev/tty ]; then
-    read -p "Enter preferred alias/command prefix [default: $DEFAULT_PREFIX]: " USER_CMD < /dev/tty || true
+    printf "Enter preferred alias/command prefix [default: %s]: " "$DEFAULT_PREFIX"
+    read -r USER_CMD < /dev/tty || true
     CMD_PREFIX="${USER_CMD:-$DEFAULT_PREFIX}"
 else
     CMD_PREFIX="$DEFAULT_PREFIX"
@@ -43,7 +44,7 @@ SCRIPT_PATH="$INSTALL_BASE/ach.py"
 
 # 1. Quick list binary: <cmd>-h
 cat << EOF > "$BIN_DIR/${CMD_PREFIX}-h"
-#!/usr/bin/env bash
+#!/bin/sh
 if [ "\$#" -eq 0 ]; then
     exec python3 "$SCRIPT_PATH" --list
 else
@@ -54,7 +55,7 @@ chmod +x "$BIN_DIR/${CMD_PREFIX}-h"
 
 # 2. Interactive menu binary: <cmd>-m
 cat << EOF > "$BIN_DIR/${CMD_PREFIX}-m"
-#!/usr/bin/env bash
+#!/bin/sh
 exec python3 "$SCRIPT_PATH" "\$@"
 EOF
 chmod +x "$BIN_DIR/${CMD_PREFIX}-m"
@@ -78,11 +79,7 @@ fi
 # 6. Auto-register skills in Antigravity skill directories if they exist
 SKILL_SRC="$INSTALL_BASE/skills/ach"
 if [ -d "$SKILL_SRC" ]; then
-    TARGET_SKILL_DIRS=(
-        "$HOME/.gemini/antigravity-cli/skills"
-        "$HOME/.agents/skills"
-    )
-    for target_dir in "${TARGET_SKILL_DIRS[@]}"; do
+    for target_dir in "$HOME/.gemini/antigravity-cli/skills" "$HOME/.agents/skills"; do
         if [ -d "$target_dir" ]; then
             rm -rf "$target_dir/sessionlist"
             dest="$target_dir/ach"
@@ -93,4 +90,9 @@ if [ -d "$SKILL_SRC" ]; then
     done
 fi
 
-echo "✔ Installed ${CMD_PREFIX}-h, ${CMD_PREFIX}-m to $BIN_DIR"
+case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) echo "Warning: $BIN_DIR is not in your PATH. Add 'export PATH=\"$BIN_DIR:\$PATH\"' to your shell profile." ;;
+esac
+
+echo "✔ Installed ${CMD_PREFIX}, ${CMD_PREFIX}-h, ${CMD_PREFIX}-m to $BIN_DIR"
